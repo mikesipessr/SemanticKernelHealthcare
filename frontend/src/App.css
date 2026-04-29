@@ -1,0 +1,257 @@
+/* ── Layout ── */
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 0 24px 48px;
+}
+
+.app-header {
+  padding: 40px 0 24px;
+  border-bottom: 1px solid #e0e0e0;
+  margin-bottom: 32px;
+}
+
+.app-header h1 {
+  margin: 0 0 8px;
+  font-size: 1.8rem;
+  color: #1a237e;
+}
+
+.app-subtitle {
+  margin: 0;
+  color: #555;
+  font-size: 1rem;
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+/* ── Recorder ── */
+.recorder-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.device-selector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.device-selector label {
+  font-weight: 600;
+  min-width: 100px;
+  color: #333;
+}
+
+.device-selector select {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  background: #fff;
+}
+
+.device-selector select:disabled {
+  opacity: 0.6;
+}
+
+.recorder-controls {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+/* ── Buttons ── */
+.btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.2s;
+}
+
+.btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.btn-start {
+  background: #1565c0;
+  color: #fff;
+}
+
+.btn-start:hover:not(:disabled) {
+  background: #0d47a1;
+}
+
+.btn-stop {
+  background: #c62828;
+  color: #fff;
+}
+
+.btn-stop:hover {
+  background: #b71c1c;
+}
+
+.btn-processing {
+  background: #757575;
+  color: #fff;
+}
+
+/* ── Record dot ── */
+.record-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: currentColor;
+  display: inline-block;
+  opacity: 0.85;
+}
+
+.record-dot.pulsing {
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50%       { transform: scale(1.4); opacity: 1; }
+}
+
+/* ── Spinner ── */
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Level meter ── */
+.level-meter {
+  display: flex;
+  gap: 3px;
+  align-items: flex-end;
+  height: 40px;
+  flex: 1;
+}
+
+.level-bar {
+  flex: 1;
+  height: 100%;
+  border-radius: 2px;
+  background: #e0e0e0;
+  transition: background-color 0.05s;
+}
+
+.level-bar[data-active='true'] {
+  /* color is set inline via hsl() */
+}
+
+/* ── Transcription ── */
+.transcription-section h2,
+.tasks-section h2 {
+  margin: 0 0 16px;
+  font-size: 1.2rem;
+  color: #333;
+}
+
+.transcription-text {
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 16px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  margin: 0;
+  color: #222;
+}
+
+.skeleton {
+  height: 80px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s infinite;
+}
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Task grid ── */
+.task-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.task-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.task-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  align-self: flex-start;
+}
+
+.task-patient {
+  margin: 0;
+  font-size: 1rem;
+  color: #111;
+}
+
+.task-description {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #555;
+  line-height: 1.5;
+}
+
+/* ── Error ── */
+.error-message {
+  color: #c62828;
+  background: #ffebee;
+  border: 1px solid #ef9a9a;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 0;
+  font-size: 0.9rem;
+}

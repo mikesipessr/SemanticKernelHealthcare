@@ -6,7 +6,22 @@
       "Bash(dotnet build *)",
       "Bash(dotnet package *)",
       "Bash(git rm *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(gh repo *)",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(dotnet --version)",
+      "Bash(npm --version)",
+      "Bash(dotnet new *)",
+      "Bash(npm list *)",
+      "Bash(npm info *)",
+      "Bash(dotnet nuget *)",
+      "Bash(dotnet tool *)",
+      "Bash(npm create *)",
+      "PowerShell(Move-Item *)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)"
     ]
   }
 }

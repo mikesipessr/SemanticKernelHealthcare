@@ -1,141 +1,169 @@
 # SemanticKernelHealthcare
 
-A tiny .NET 10 console app that records from your microphone and transcribes the
-recording using **Microsoft Semantic Kernel** + **OpenAI Whisper**.
+A full-stack healthcare voice assistant demo built with **React** + **ASP.NET Core** + **Microsoft Semantic Kernel**.
 
-It's the companion sample for an upcoming blog post on my personal site — the
-goal is to show how little code it takes to wire up a real audio pipeline with
-Semantic Kernel's `IAudioToTextService` abstraction.
+Record a clinical note, get an automatic transcription via OpenAI Whisper, and extract structured healthcare task objects using GPT-4o — all wired together with Semantic Kernel's service abstractions.
 
-## What it does
+This is the companion sample for a blog post series. A follow-up post will add an agentic layer that dispatches each task to the appropriate tool (pharmacy system, EHR API, referral service, etc.).
 
-1. Lists every audio input device the OS exposes and lets you pick one
-   (Enter for the default).
-2. Prompts you to press **Enter** to begin recording.
-3. Captures audio from the chosen microphone (16 kHz / 16-bit / mono WAV)
-   using [NAudio](https://github.com/naudio/NAudio), and shows a live level
-   meter and byte counter so you can see audio is actually arriving.
-4. Stops when you press **Enter** again, waits for NAudio's recording
-   thread to finish flushing, and writes the WAV file to your temp
-   directory. If zero bytes were captured it prints a diagnostic and exits.
-5. Builds a `Kernel` with the OpenAI audio-to-text connector
-   (`AddOpenAIAudioToText`).
-6. Loads the WAV bytes into a Semantic Kernel `AudioContent` object and
-   calls `IAudioToTextService.GetTextContentAsync(...)` against the
-   `whisper-1` model.
-7. Prints the transcribed text to the console.
+## Architecture
+
+```
+Browser (React + Vite)
+  │  getUserMedia() → Web Audio API (level meter)
+  │  MediaRecorder → audio/webm blob
+  │  POST /api/audio/transcribe (multipart)
+  ▼
+ASP.NET Core Web API (.NET 10)
+  ├── TranscriptionService   → Semantic Kernel IAudioToTextService → OpenAI Whisper
+  └── TaskClassificationService → Semantic Kernel IChatCompletionService → GPT-4o
+  ▼
+TranscribeResponse { transcription: string, tasks: HealthcareTask[] }
+```
+
+### HealthcareTask model
+
+```csharp
+public enum TaskType { MedicationRefill, MedicationOrder, ReferralOrder, LabOrder }
+
+public class HealthcareTask
+{
+    public TaskType Type { get; set; }
+    public string PatientFirstName { get; set; }
+    public string PatientLastName { get; set; }
+    public string Description { get; set; }
+}
+```
 
 ## Project layout
 
 ```
 SemanticKernelHealthcare/
-├── Program.cs                          # The whole app - heavily commented
-├── SemanticKernelHealthcare.csproj     # net10.0 + Microsoft.SemanticKernel + NAudio
-├── SemanticKernelHealthcare.slnx
-└── README.md                           # You are here
+├── backend/
+│   ├── SemanticKernelHealthcare.Api.csproj
+│   ├── Program.cs
+│   ├── Controllers/AudioController.cs
+│   ├── Models/          HealthcareTask, TaskType, TranscribeResponse
+│   └── Services/        TranscriptionService, TaskClassificationService
+└── frontend/
+    └── src/
+        ├── App.tsx
+        ├── hooks/        useAudioRecorder, useLevelMeter
+        ├── components/   DeviceSelector, RecordButton, LevelMeter,
+        │                 TranscriptionDisplay, TaskCard
+        ├── api/          transcribeApi.ts
+        └── types/        healthcare.ts
 ```
 
 ## Prerequisites
 
-- **.NET 10 SDK** (the project targets `net10.0`)
-- **Windows** with a working microphone (NAudio uses WASAPI under the hood —
-  the recording portion is Windows-only; the Semantic Kernel portion is
-  cross-platform)
-- An **OpenAI API key** with access to the `whisper-1` model
+- **.NET 10 SDK**
+- **Node.js 18+**
+- **OpenAI API key** with access to `whisper-1` and `gpt-4o`
+- A modern browser (Chrome, Edge, or Firefox recommended)
 
 ## Setup
 
-1. **Set your OpenAI API key** as an environment variable so it stays out of
-   source control:
+### API key
 
-   ```powershell
-   setx OPENAI_API_KEY "sk-your-key-here"
-   ```
+**Option A — `appsettings.Development.json`** (gitignored):
 
-   `setx` only updates the environment for **future** processes — close any
-   existing terminals (and any IDE that was open before you ran it) and
-   launch a fresh one. To set the key for just the current PowerShell
-   session instead:
+Create `backend/appsettings.Development.json`:
+```json
+{
+  "OpenAI": {
+    "ApiKey": "sk-your-key-here"
+  }
+}
+```
 
-   ```powershell
-   $env:OPENAI_API_KEY = "sk-your-key-here"
-   ```
+**Option B — dotnet user-secrets**:
+```powershell
+cd backend
+dotnet user-secrets set "OpenAI:ApiKey" "sk-your-key-here"
+```
 
-2. **Restore and build**:
-
-   ```powershell
-   dotnet restore
-   dotnet build
-   ```
-
-## Running
+### Install frontend dependencies
 
 ```powershell
+cd frontend
+npm install
+```
+
+## Running in development
+
+Two terminals:
+
+**Terminal 1 — backend:**
+```powershell
+cd backend
 dotnet run
 ```
+API available at `http://localhost:5000`.
 
-Then follow the prompts:
-
+**Terminal 2 — frontend:**
+```powershell
+cd frontend
+npm run dev
 ```
-Available input devices:
-  [0] Microphone (Realtek Audio)
-  [1] Headset (Some USB Headset)
-Pick device [0-1] (Enter for 0):
+App available at `http://localhost:5173`. Vite proxies `/api/*` to the backend automatically — no CORS configuration needed in the browser.
 
-Press ENTER to start recording...
-Recording... press ENTER again to stop. (level should move when you talk)
-level: [########            ] bytes:    48000
-Saved recording to: C:\Users\you\AppData\Local\Temp\sk_recording_xxxxx.wav (160,044 bytes)
-Transcribing...
+## API reference
 
----- Transcription ----
-Hello world, this is a Semantic Kernel audio-to-text demo.
------------------------
+### `POST /api/audio/transcribe`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `audio` | multipart file | Audio recording (WebM, MP4, WAV accepted) |
+
+**Response:**
+```json
+{
+  "transcription": "Please schedule a referral for Jane Doe to oncology...",
+  "tasks": [
+    {
+      "type": "ReferralOrder",
+      "patientFirstName": "Jane",
+      "patientLastName": "Doe",
+      "description": "Schedule a referral to oncology for Jane Doe."
+    }
+  ]
+}
 ```
 
 ## Key APIs used
 
 | API | Purpose |
 |-----|---------|
-| `WaveInEvent` (NAudio) | Captures microphone samples on a background thread |
-| `WaveFileWriter` (NAudio) | Persists samples to a standard PCM WAV file |
-| `Kernel.CreateBuilder().AddOpenAIAudioToText(...)` | Registers OpenAI's Whisper connector with the kernel |
-| `IAudioToTextService` | The Semantic Kernel abstraction — swap the connector to retarget Azure OpenAI, a local model, etc. |
-| `AudioContent` | SK's transport type for binary audio (bytes + MIME type) |
-| `OpenAIAudioToTextExecutionSettings` | Optional knobs: `Language`, `ResponseFormat`, `Temperature`, prompt |
+| `navigator.mediaDevices.getUserMedia()` | Browser microphone access |
+| `MediaRecorder` | Records audio as WebM/Opus blob |
+| `AnalyserNode` (Web Audio API) | Powers the real-time level meter |
+| `IAudioToTextService` (Semantic Kernel) | Whisper transcription abstraction |
+| `IChatCompletionService` (Semantic Kernel) | GPT-4o task extraction abstraction |
+| `AddOpenAIAudioToText` / `AddOpenAIChatCompletion` | SK connector registration |
 
 ## Notes & caveats
 
-- The Semantic Kernel audio-to-text APIs are still tagged **experimental**
-  (`SKEXP0001` / `SKEXP0010`). The `.csproj` suppresses those warnings — drop
-  the `<NoWarn>` line once they go GA.
-- OpenAI's audio endpoint currently caps individual files at **25 MB**. For
-  16 kHz / 16-bit mono that's roughly **13 minutes** of audio per request.
-- To target **Azure OpenAI** instead, swap `AddOpenAIAudioToText` for
-  `AddAzureOpenAIAudioToText` and pass your deployment name and endpoint.
-- The SK OpenAI connector's `ResponseFormat` only accepts `json`,
-  `verbose_json`, `vtt`, or `srt` — **not** `text`, despite that being a
-  valid value in OpenAI's underlying API. Leave it unset and read the
-  result from `TextContent.Text`.
-- `WaveInEvent.StopRecording()` is asynchronous: don't dispose the
-  `WaveFileWriter` until the `RecordingStopped` event fires, or you'll get
-  a truncated WAV file with just the header and no audio data.
+- Audio-to-text APIs in Semantic Kernel are still **experimental** (`SKEXP0001` / `SKEXP0010`). The `.csproj` suppresses those warnings — remove `<NoWarn>` once they go GA.
+- OpenAI's Whisper endpoint caps files at **25 MB**. The API enforces this via `[RequestSizeLimit]`.
+- Browser audio is recorded as **WebM/Opus** (Chrome/Edge/Firefox) or **MP4/AAC** (Safari). OpenAI's transcription endpoint accepts both natively — no server-side conversion needed.
+- The `TaskClassificationService` uses `Temperature = 0.0` for deterministic JSON output. The system prompt instructs the model to return a raw JSON array with no markdown or explanation.
+- The `HealthcareTask` objects are intentionally thin — just the data needed for display and future dispatch. The upcoming agentic layer will route each task to the appropriate tool based on `TaskType`.
 
-## Troubleshooting
+## Extensibility (upcoming)
 
-**"OPENAI_API_KEY environment variable is not set"** — see the note under
-Setup; `setx` doesn't affect your current shell or any IDE that was already
-open.
+The next article will add an `AgentOrchestrationService` that receives the `HealthcareTask` list and dispatches each item to a Semantic Kernel tool per task type:
 
-**Level meter stays flat / no bytes captured** — the wrong input device is
-likely selected, or Windows is blocking microphone access for desktop apps.
-Check Settings → Privacy & security → Microphone and make sure
-"Let desktop apps access your microphone" is on, and try a different device
-number from the list the app prints at startup.
+```
+HealthcareTask[] → AgentOrchestrationService
+    ├── MedicationRefillTool  (pharmacy system)
+    ├── MedicationOrderTool   (EHR API)
+    ├── ReferralOrderTool     (referral fax / HL7)
+    └── LabOrderTool          (lab requisition system)
+```
 
-**`NotSupportedException: The audio transcription format 'text' is not
-supported`** — see the `ResponseFormat` note above.
+The `ITaskClassificationService` interface is independently injectable, making it straightforward to wire into that orchestration pipeline.
 
 ## License
 
-MIT — do whatever you like with it.
+MIT

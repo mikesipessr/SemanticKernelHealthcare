@@ -99,7 +99,7 @@ Two terminals:
 cd backend
 dotnet run
 ```
-API available at `http://localhost:5000`.
+API available at `http://localhost:5050`.
 
 **Terminal 2 — frontend:**
 ```powershell

@@ -1,4 +1,4 @@
-# Semantic Kernel Audio-to-Text Demo
+# SemanticKernelHealthcare
 
 A tiny .NET 10 console app that records from your microphone and transcribes the
 recording using **Microsoft Semantic Kernel** + **OpenAI Whisper**.
@@ -28,12 +28,11 @@ Semantic Kernel's `IAudioToTextService` abstraction.
 ## Project layout
 
 ```
-SemanticKernelAudioToText/
-├── Program.cs                         # The whole app - heavily commented
-├── SemanticKernelAudioToText.csproj   # net10.0 + Microsoft.SemanticKernel + NAudio
-├── SemanticKernelAudioToText.slnx
-├── blog-post.md                       # Companion blog article
-└── README.md                          # You are here
+SemanticKernelHealthcare/
+├── Program.cs                          # The whole app - heavily commented
+├── SemanticKernelHealthcare.csproj     # net10.0 + Microsoft.SemanticKernel + NAudio
+├── SemanticKernelHealthcare.slnx
+└── README.md                           # You are here
 ```
 
 ## Prerequisites

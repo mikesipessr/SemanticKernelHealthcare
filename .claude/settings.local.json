@@ -4,7 +4,9 @@
       "WebSearch",
       "WebFetch(domain:github.com)",
       "Bash(dotnet build *)",
-      "Bash(dotnet package *)"
+      "Bash(dotnet package *)",
+      "Bash(git rm *)",
+      "Bash(git add *)"
     ]
   }
 }

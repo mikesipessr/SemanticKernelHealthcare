@@ -257,3 +257,69 @@
   margin: 0;
   font-size: 0.9rem;
 }
+
+/* ── Dark mode overrides ── */
+@media (prefers-color-scheme: dark) {
+  .app-header {
+    border-bottom-color: #3a3a4a;
+  }
+
+  .app-header h1 {
+    color: #a78bfa;
+  }
+
+  .app-subtitle {
+    color: #9ca3af;
+  }
+
+  .device-selector label {
+    color: #d1d5db;
+  }
+
+  .device-selector select {
+    background: #1f2028;
+    color: #e5e7eb;
+    border-color: #3a3a4a;
+    color-scheme: dark;
+  }
+
+  .transcription-section h2,
+  .tasks-section h2 {
+    color: #e5e7eb;
+  }
+
+  .transcription-text {
+    background: #1f2028;
+    border-color: #3a3a4a;
+    color: #e5e7eb;
+  }
+
+  .skeleton {
+    background: linear-gradient(90deg, #1f2028 25%, #2a2b38 50%, #1f2028 75%);
+    background-size: 200% 100%;
+  }
+
+  .task-card {
+    background: #1f2028;
+    border-color: #3a3a4a;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  }
+
+  .task-patient {
+    color: #f3f4f6;
+  }
+
+  .task-description {
+    color: #9ca3af;
+  }
+
+  .level-bar {
+    background: #2e303a;
+  }
+
+  .error-message {
+    color: #fca5a5;
+    background: #3b1515;
+    border-color: #7f1d1d;
+  }
+}

@@ -58,6 +58,8 @@
   border-radius: 6px;
   font-size: 0.95rem;
   background: #fff;
+  color: #333;
+  color-scheme: light;
 }
 
 .device-selector select:disabled {

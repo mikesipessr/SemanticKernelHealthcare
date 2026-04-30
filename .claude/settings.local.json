@@ -21,7 +21,9 @@
       "Bash(npm create *)",
       "PowerShell(Move-Item *)",
       "Bash(npm install *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(xargs grep *)",
+      "WebFetch(domain:mikesipes.me)"
     ]
   }
 }

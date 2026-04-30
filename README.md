@@ -2,57 +2,106 @@
 
 A full-stack healthcare voice assistant demo built with **React** + **ASP.NET Core** + **Microsoft Semantic Kernel**.
 
-Record a clinical note, get an automatic transcription via OpenAI Whisper, and extract structured healthcare task objects using GPT-4o — all wired together with Semantic Kernel's service abstractions.
+Record a clinical note, get an automatic transcription via OpenAI Whisper, and extract structured healthcare tasks using GPT-4o. Each task is then dispatched to a Semantic Kernel agent that selects and calls the right tool — with real-time status updates streamed back to the UI via SignalR.
 
-This is the companion sample for a blog post series. A follow-up post will add an agentic layer that dispatches each task to the appropriate tool (pharmacy system, EHR API, referral service, etc.).
+**GitHub:** [mikesipessr/SemanticKernelHealthcare](https://github.com/mikesipessr/SemanticKernelHealthcare)
+
+---
+
+> **This is a demo. Do not use it with real patient data.**
+>
+> Patient names, clinical notes, and task descriptions are Protected Health Information (PHI). Before sending PHI to any third-party AI service — including OpenAI — you must have a **Business Associate Agreement (BAA)** in place with that vendor. This project has no BAA, no audit logging, no access controls, and no de-identification pipeline. It is for learning and architecture exploration only.
+
+---
+
+## How It Works
+
+1. Click record and speak a clinical note
+2. The audio is transcribed by Whisper and structured into tasks by GPT-4o
+3. Tasks appear as cards — hit **Run** on any card or **Run All Tasks** to fire them all
+4. Each task spins up a Semantic Kernel agent that picks the right tool (`RefillPrescription`, `SubmitLabOrder`, `SubmitReferralOrder`, or `CreateMedicationOrder`) and executes it
+5. Real-time updates stream back over SignalR: you can watch the agent select and call tools as it works
+6. Completed cards show the tool result, timestamp, and token usage. The Activity Log at the bottom keeps a timestamped feed of every event across all tasks.
 
 ## Architecture
 
 ```
 Browser (React + Vite)
-  │  getUserMedia() → Web Audio API (level meter)
-  │  MediaRecorder → audio/webm blob
+  │  getUserMedia() → MediaRecorder → audio/webm blob
   │  POST /api/audio/transcribe (multipart)
+  │
   ▼
 ASP.NET Core Web API (.NET 10)
-  ├── TranscriptionService   → Semantic Kernel IAudioToTextService → OpenAI Whisper
-  └── TaskClassificationService → Semantic Kernel IChatCompletionService → GPT-4o
+  ├── TranscriptionService       → SK IAudioToTextService  → Whisper
+  └── TaskClassificationService  → SK IChatCompletionService → GPT-4o
+  │
   ▼
-TranscribeResponse { transcription: string, tasks: HealthcareTask[] }
+HealthcareTask[] (type, patient, description)
+  │
+  │  POST /api/tasks/execute  →  202 Accepted
+  ▼
+AgentOrchestrationService  (one Task.Run per task, concurrent)
+  ├── Kernel.Clone() + HealthcarePlugin registered per task
+  ├── FunctionChoiceBehavior.Auto() — model selects the tool
+  ├── IAutoFunctionInvocationFilter (SignalRInvocationFilter)
+  │     fires SignalR push before + after each tool call
+  └── IHubContext<TaskExecutionHub>  → SignalR → browser
 ```
 
-### HealthcareTask model
+### HealthcarePlugin tools
 
-```csharp
-public enum TaskType { MedicationRefill, MedicationOrder, ReferralOrder, LabOrder }
+| KernelFunction | What it simulates |
+|---|---|
+| `RefillPrescription` | Submits a refill to the pharmacy system |
+| `SubmitLabOrder` | Creates a lab requisition in the EHR |
+| `SubmitReferralOrder` | Sends a specialist referral |
+| `CreateMedicationOrder` | Creates a new prescription |
 
-public class HealthcareTask
-{
-    public TaskType Type { get; set; }
-    public string PatientFirstName { get; set; }
-    public string PatientLastName { get; set; }
-    public string Description { get; set; }
-}
-```
+Each tool has a 1.5-second simulated delay and returns realistic JSON (confirmation numbers, pharmacy names, specialist assignments, etc.).
 
-## Project layout
+## Project Layout
 
 ```
 SemanticKernelHealthcare/
 ├── backend/
-│   ├── SemanticKernelHealthcare.Api.csproj
 │   ├── Program.cs
-│   ├── Controllers/AudioController.cs
-│   ├── Models/          HealthcareTask, TaskType, TranscribeResponse
-│   └── Services/        TranscriptionService, TaskClassificationService
+│   ├── Controllers/
+│   │   ├── AudioController.cs       POST /api/audio/transcribe
+│   │   └── TasksController.cs       POST /api/tasks/execute
+│   ├── Hubs/
+│   │   └── TaskExecutionHub.cs      SignalR hub at /hubs/tasks
+│   ├── Models/
+│   │   ├── HealthcareTask.cs
+│   │   ├── TaskExecutionRequest.cs
+│   │   ├── TaskExecutionStatus.cs
+│   │   ├── TaskExecutionUpdate.cs
+│   │   └── TranscribeResponse.cs
+│   ├── Plugins/
+│   │   └── HealthcarePlugin.cs      KernelFunction tools
+│   └── Services/
+│       ├── TranscriptionService.cs
+│       ├── TaskClassificationService.cs
+│       ├── AgentOrchestrationService.cs   agent + SignalR filter
+│       └── IAgentOrchestrationService.cs
 └── frontend/
     └── src/
         ├── App.tsx
-        ├── hooks/        useAudioRecorder, useLevelMeter
-        ├── components/   DeviceSelector, RecordButton, LevelMeter,
-        │                 TranscriptionDisplay, TaskCard
-        ├── api/          transcribeApi.ts
-        └── types/        healthcare.ts
+        ├── hooks/
+        │   ├── useAudioRecorder.ts
+        │   ├── useLevelMeter.ts
+        │   └── useTaskExecution.ts    SignalR connection + state map
+        ├── components/
+        │   ├── ActivityLog.tsx        real-time event feed
+        │   ├── DeviceSelector.tsx
+        │   ├── LevelMeter.tsx
+        │   ├── RecordButton.tsx
+        │   ├── TaskCard.tsx           idle / running / completed / failed states
+        │   └── TranscriptionDisplay.tsx
+        ├── api/
+        │   ├── transcribeApi.ts
+        │   └── tasksApi.ts
+        └── types/
+            └── healthcare.ts
 ```
 
 ## Prerequisites
@@ -77,7 +126,7 @@ Create `backend/appsettings.Development.json`:
 }
 ```
 
-**Option B — dotnet user-secrets**:
+**Option B — dotnet user-secrets:**
 ```powershell
 cd backend
 dotnet user-secrets set "OpenAI:ApiKey" "sk-your-key-here"
@@ -90,7 +139,7 @@ cd frontend
 npm install
 ```
 
-## Running in development
+## Running in Development
 
 Two terminals:
 
@@ -106,14 +155,14 @@ API available at `http://localhost:5050`.
 cd frontend
 npm run dev
 ```
-App available at `http://localhost:5173`. Vite proxies `/api/*` to the backend automatically — no CORS configuration needed in the browser.
+App available at `http://localhost:5173`. Vite proxies `/api/*` and `/hubs/*` to the backend automatically.
 
-## API reference
+## API Reference
 
 ### `POST /api/audio/transcribe`
 
 | Field | Type | Description |
-|-------|------|-------------|
+|---|---|---|
 | `audio` | multipart file | Audio recording (WebM, MP4, WAV accepted) |
 
 **Response:**
@@ -131,38 +180,65 @@ App available at `http://localhost:5173`. Vite proxies `/api/*` to the backend a
 }
 ```
 
-## Key APIs used
+### `POST /api/tasks/execute`
 
-| API | Purpose |
-|-----|---------|
+Accepts a list of task execution requests. Returns **202 Accepted** immediately — results are delivered via SignalR, not the HTTP response.
+
+```json
+[
+  {
+    "taskId": "uuid",
+    "type": "ReferralOrder",
+    "patientFirstName": "Jane",
+    "patientLastName": "Doe",
+    "description": "Schedule a referral to oncology."
+  }
+]
+```
+
+### SignalR — `/hubs/tasks`
+
+Connect and listen for `TaskUpdated` events:
+
+```typescript
+connection.on('TaskUpdated', (update: TaskExecutionUpdate) => { ... });
+```
+
+`TaskExecutionUpdate` shape:
+
+| Field | Type | Description |
+|---|---|---|
+| `taskId` | string | Matches the ID in the original request |
+| `status` | `Running` \| `Completed` \| `Failed` | Current state |
+| `toolName` | string? | Which KernelFunction is being/was called |
+| `message` | string | Human-readable status message |
+| `details` | string? | Raw JSON result from the tool |
+| `promptTokens` | number? | Input tokens used |
+| `completionTokens` | number? | Output tokens used |
+| `startedAt` | string | ISO timestamp |
+| `completedAt` | string? | ISO timestamp |
+
+## Key APIs & Libraries
+
+| API / Library | Purpose |
+|---|---|
 | `navigator.mediaDevices.getUserMedia()` | Browser microphone access |
 | `MediaRecorder` | Records audio as WebM/Opus blob |
 | `AnalyserNode` (Web Audio API) | Powers the real-time level meter |
 | `IAudioToTextService` (Semantic Kernel) | Whisper transcription abstraction |
-| `IChatCompletionService` (Semantic Kernel) | GPT-4o task extraction abstraction |
-| `AddOpenAIAudioToText` / `AddOpenAIChatCompletion` | SK connector registration |
+| `IChatCompletionService` (Semantic Kernel) | GPT-4o task extraction and agent chat |
+| `[KernelFunction]` / `[Description]` | Tool authoring for the healthcare plugin |
+| `FunctionChoiceBehavior.Auto()` | Lets the model select tools automatically |
+| `IAutoFunctionInvocationFilter` | Intercepts tool calls for real-time SignalR pushes |
+| `@microsoft/signalr` | Frontend SignalR client |
 
-## Notes & caveats
+## Notes & Caveats
 
 - Audio-to-text APIs in Semantic Kernel are still **experimental** (`SKEXP0001` / `SKEXP0010`). The `.csproj` suppresses those warnings — remove `<NoWarn>` once they go GA.
+- `FunctionChoiceBehavior.Auto()` is also experimental (`SKEXP0001`). Same story.
 - OpenAI's Whisper endpoint caps files at **25 MB**. The API enforces this via `[RequestSizeLimit]`.
-- Browser audio is recorded as **WebM/Opus** (Chrome/Edge/Firefox) or **MP4/AAC** (Safari). OpenAI's transcription endpoint accepts both natively — no server-side conversion needed.
-- The `TaskClassificationService` uses `Temperature = 0.0` for deterministic JSON output. The system prompt instructs the model to return a raw JSON array with no markdown or explanation.
-- The `HealthcareTask` objects are intentionally thin — just the data needed for display and future dispatch. The upcoming agentic layer will route each task to the appropriate tool based on `TaskType`.
-
-## Extensibility (upcoming)
-
-The next article will add an `AgentOrchestrationService` that receives the `HealthcareTask` list and dispatches each item to a Semantic Kernel tool per task type:
-
-```
-HealthcareTask[] → AgentOrchestrationService
-    ├── MedicationRefillTool  (pharmacy system)
-    ├── MedicationOrderTool   (EHR API)
-    ├── ReferralOrderTool     (referral fax / HL7)
-    └── LabOrderTool          (lab requisition system)
-```
-
-The `ITaskClassificationService` interface is independently injectable, making it straightforward to wire into that orchestration pipeline.
+- The SignalR hub broadcasts to `Clients.All` — fine for a single-user demo, but in any real deployment you'd scope pushes to a specific connection or group.
+- Token counting uses reflection against the response metadata object. It works, but it's worth watching for breakage on SK version bumps.
 
 ## License
 

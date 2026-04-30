@@ -1,33 +1,13 @@
-// ============================================================
-// TaskCard.tsx — Displays a single extracted HealthcareTask
-//
-// Each card shows:
-//   - A colored badge indicating the task type
-//   - The patient's full name (or "Unknown Patient" if blank)
-//   - The plain-English description of what needs to happen
-//
-// Color-coded badges make it easy to scan a list of mixed task
-// types at a glance. The colors follow a rough semantic convention:
-//   Green  → medication management (refills)
-//   Blue   → new orders (medications)
-//   Orange → referrals (routing to another provider)
-//   Purple → lab work (diagnostic)
-// ============================================================
+import { useState } from 'react';
+import type { HealthcareTask, TaskExecutionUpdate, TaskType } from '../types/healthcare';
 
-import type { HealthcareTask, TaskType } from '../types/healthcare';
-
-// Map each TaskType to a badge background color.
-// Using a Record<TaskType, string> ensures TypeScript will error if
-// a new TaskType is added to the union without a corresponding color.
 const BADGE_COLORS: Record<TaskType, string> = {
-  MedicationRefill: '#2e7d32', // dark green
-  MedicationOrder:  '#1565c0', // dark blue
-  ReferralOrder:    '#e65100', // deep orange
-  LabOrder:         '#6a1b9a', // deep purple
+  MedicationRefill: '#2e7d32',
+  MedicationOrder:  '#1565c0',
+  ReferralOrder:    '#e65100',
+  LabOrder:         '#6a1b9a',
 };
 
-// Human-readable labels for the badge text.
-// The enum values are PascalCase; these add spaces for readability.
 const LABEL: Record<TaskType, string> = {
   MedicationRefill: 'Medication Refill',
   MedicationOrder:  'Medication Order',
@@ -35,27 +15,97 @@ const LABEL: Record<TaskType, string> = {
   LabOrder:         'Lab Order',
 };
 
-export function TaskCard({ task }: { task: HealthcareTask }) {
-  // Combine first and last name, filtering out empty strings so we
-  // don't end up with a leading or trailing space if one is blank.
-  // Fall back to "Unknown Patient" if neither name was captured.
+interface TaskCardProps {
+  task: HealthcareTask;
+  execution?: TaskExecutionUpdate;
+  onRun: () => void;
+}
+
+function formatTime(iso: string) {
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function prettyJson(raw: string) {
+  try { return JSON.stringify(JSON.parse(raw), null, 2); }
+  catch { return raw; }
+}
+
+export function TaskCard({ task, execution, onRun }: TaskCardProps) {
+  const [showDetails, setShowDetails] = useState(false);
+
   const patientName =
     [task.patientFirstName, task.patientLastName].filter(Boolean).join(' ') || 'Unknown Patient';
 
+  const statusClass = execution
+    ? execution.status === 'Running'   ? 'running'
+    : execution.status === 'Completed' ? 'completed'
+    : 'failed'
+    : '';
+
   return (
-    <div className="task-card">
-      {/* Colored badge identifies the task type at a glance. */}
+    <div className={`task-card ${statusClass}`}>
       <span className="task-badge" style={{ backgroundColor: BADGE_COLORS[task.type] }}>
         {LABEL[task.type]}
       </span>
 
-      {/* Patient name is the most prominent text on the card. */}
       <h3 className="task-patient">{patientName}</h3>
-
-      {/* The description is GPT-4o's plain-English summary of what
-          needs to happen. In the future agentic layer this text will
-          be passed as an instruction to the appropriate tool. */}
       <p className="task-description">{task.description}</p>
+
+      {/* ── Execution status area ── */}
+      {!execution && (
+        <button className="btn btn-run" onClick={onRun}>
+          ▶ Run
+        </button>
+      )}
+
+      {execution?.status === 'Running' && (
+        <div className="task-status-row">
+          <span className="spinner" />
+          <span className="task-status-text">
+            {execution.toolName ? `Calling ${execution.toolName}…` : 'Agent analyzing…'}
+          </span>
+        </div>
+      )}
+
+      {execution?.status === 'Completed' && (
+        <div className="task-result">
+          <div className="task-status-row">
+            <span className="status-icon status-success">✓</span>
+            <span className="task-tool-name">{execution.toolName}</span>
+            {execution.completedAt && (
+              <span className="task-timestamp">{formatTime(execution.completedAt)}</span>
+            )}
+          </div>
+          {(execution.promptTokens != null || execution.completionTokens != null) && (
+            <div className="task-token-row">
+              <span className="task-token-count">
+                {execution.promptTokens ?? 0}↑ &nbsp;{execution.completionTokens ?? 0}↓
+                &nbsp;=&nbsp;{(execution.promptTokens ?? 0) + (execution.completionTokens ?? 0)} tokens
+              </span>
+            </div>
+          )}
+          {execution.details && (
+            <>
+              <button
+                className="task-details-toggle"
+                onClick={() => setShowDetails(v => !v)}
+              >
+                {showDetails ? '▲ Hide details' : '▼ Show details'}
+              </button>
+              {showDetails && (
+                <pre className="task-details-panel">{prettyJson(execution.details)}</pre>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {execution?.status === 'Failed' && (
+        <div className="task-status-row">
+          <span className="status-icon status-error">✕</span>
+          <span className="task-status-text task-error-text">{execution.message}</span>
+        </div>
+      )}
     </div>
   );
 }

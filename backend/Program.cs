@@ -12,6 +12,7 @@
 
 using System.Text.Json.Serialization;
 using Microsoft.SemanticKernel;
+using SemanticKernelHealthcare.Api.Hubs;
 using SemanticKernelHealthcare.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -46,6 +47,9 @@ var whisperModel = builder.Configuration["OpenAI:WhisperModel"] ?? "whisper-1";
 // ------------------------------------------------------------
 builder.Services.AddControllers()
     .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+
+builder.Services.AddSignalR()
+    .AddJsonProtocol(o => o.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 // AddOpenApi() enables the built-in OpenAPI document generation
 // introduced in .NET 9+. In development you can browse the spec at
@@ -87,6 +91,7 @@ builder.Services.AddKernel()
 // ------------------------------------------------------------
 builder.Services.AddScoped<ITranscriptionService, TranscriptionService>();
 builder.Services.AddScoped<ITaskClassificationService, TaskClassificationService>();
+builder.Services.AddSingleton<IAgentOrchestrationService, AgentOrchestrationService>();
 
 // ------------------------------------------------------------
 // CORS policy for Vite's development server
@@ -106,7 +111,8 @@ builder.Services.AddCors(options =>
     options.AddPolicy("ViteDev", policy =>
         policy.WithOrigins("http://localhost:5173", "https://localhost:5173")
               .AllowAnyHeader()
-              .AllowAnyMethod()));
+              .AllowAnyMethod()
+              .AllowCredentials()));
 
 var app = builder.Build();
 
@@ -134,6 +140,7 @@ app.UseStaticFiles();
 
 // Route incoming requests to the matching [ApiController] action.
 app.MapControllers();
+app.MapHub<TaskExecutionHub>("/hubs/tasks");
 
 // For any request that doesn't match a controller route, serve
 // index.html. This is the standard SPA fallback pattern: it lets

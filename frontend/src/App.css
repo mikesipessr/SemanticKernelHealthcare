@@ -258,6 +258,269 @@
   font-size: 0.9rem;
 }
 
+/* ── Tasks header ── */
+.tasks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.tasks-header h2 {
+  margin: 0;
+}
+
+/* ── Run buttons ── */
+.btn-run {
+  background: #2e7d32;
+  color: #fff;
+  padding: 8px 14px;
+  font-size: 0.875rem;
+  align-self: flex-start;
+}
+
+.btn-run:hover:not(:disabled) {
+  background: #1b5e20;
+}
+
+.btn-run-all {
+  background: #1565c0;
+  color: #fff;
+  padding: 10px 22px;
+  font-size: 0.95rem;
+}
+
+.btn-run-all:hover:not(:disabled) {
+  background: #0d47a1;
+}
+
+/* ── Task card execution states ── */
+.task-card.running {
+  border-color: #1565c0;
+  box-shadow: 0 0 0 2px rgba(21, 101, 192, 0.2), 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.task-card.completed {
+  border-color: #2e7d32;
+  box-shadow: 0 0 0 2px rgba(46, 125, 50, 0.2), 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.task-card.failed {
+  border-color: #c62828;
+  box-shadow: 0 0 0 2px rgba(198, 40, 40, 0.2), 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+/* ── Status rows ── */
+.task-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  animation: fade-in 0.25s ease;
+}
+
+.task-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.task-status-text {
+  color: #555;
+}
+
+.task-error-text {
+  color: #c62828;
+}
+
+.task-tool-name {
+  font-weight: 600;
+  color: #333;
+}
+
+.task-timestamp {
+  color: #888;
+  font-size: 0.78rem;
+  margin-left: auto;
+}
+
+/* ── Status icons ── */
+.status-icon {
+  font-size: 1rem;
+  font-weight: 700;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 0.8rem;
+}
+
+.status-success {
+  background: #2e7d32;
+  color: #fff;
+}
+
+.status-error {
+  background: #c62828;
+  color: #fff;
+}
+
+/* Override spinner color for task cards (dark background not present) */
+.task-status-row .spinner {
+  border-color: rgba(21, 101, 192, 0.3);
+  border-top-color: #1565c0;
+  width: 14px;
+  height: 14px;
+}
+
+/* ── Expandable details panel ── */
+.task-details-toggle {
+  background: none;
+  border: none;
+  color: #1565c0;
+  cursor: pointer;
+  font-size: 0.82rem;
+  padding: 0;
+  text-decoration: underline;
+  text-align: left;
+}
+
+.task-details-panel {
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  margin: 0;
+  white-space: pre;
+  color: #333;
+  animation: fade-in 0.2s ease;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Token row on task cards ── */
+.task-token-row {
+  display: flex;
+  align-items: center;
+}
+
+.task-token-count {
+  font-size: 0.75rem;
+  color: #888;
+  background: #f0f0f0;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-family: var(--mono, monospace);
+}
+
+/* ── Activity Log ── */
+.activity-log-section {
+  margin-top: 8px;
+}
+
+.activity-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.activity-log-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: #333;
+}
+
+.activity-log-clear {
+  background: #444;
+  color: #fff;
+  padding: 5px 14px;
+  font-size: 0.82rem;
+}
+
+.activity-log-clear:hover {
+  background: #222;
+}
+
+.activity-log {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 14px 16px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.82rem;
+  line-height: 1.7;
+  max-height: 320px;
+  overflow-y: auto;
+  color: #c9d1d9;
+}
+
+.activity-log-empty {
+  color: #484f58;
+  margin: 0;
+  text-align: center;
+  padding: 24px 0;
+}
+
+.log-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 1px 0;
+}
+
+.log-time {
+  color: #484f58;
+  flex-shrink: 0;
+  font-size: 0.78rem;
+}
+
+.log-icon {
+  flex-shrink: 0;
+  font-weight: 700;
+  width: 14px;
+  text-align: center;
+}
+
+.log-icon-running  { color: #58a6ff; }
+.log-icon-success  { color: #3fb950; }
+.log-icon-error    { color: #f85149; }
+
+.log-label {
+  color: #8b949e;
+  flex-shrink: 0;
+}
+
+.log-entry-running .log-message   { color: #58a6ff; }
+.log-entry-completed .log-message { color: #3fb950; }
+.log-entry-failed .log-message    { color: #f85149; }
+
+.log-message {
+  flex: 1;
+  word-break: break-word;
+}
+
+.log-tokens {
+  color: #8b949e;
+  font-size: 0.75rem;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 0px 6px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 /* ── Dark mode overrides ── */
 @media (prefers-color-scheme: dark) {
   .app-header {
@@ -322,4 +585,34 @@
     background: #3b1515;
     border-color: #7f1d1d;
   }
+
+  .task-token-count { background: #2a2b38; color: #6b7280; }
+
+  .activity-log-header h2 { color: #e5e7eb; }
+  .activity-log-clear { background: #2a2b38; }
+  .activity-log-clear:hover { background: #3a3b48; }
+
+  .task-card.running   { box-shadow: 0 0 0 2px rgba(21, 101, 192, 0.35), 0 1px 4px rgba(0, 0, 0, 0.3); }
+  .task-card.completed { box-shadow: 0 0 0 2px rgba(46, 125, 50, 0.35),  0 1px 4px rgba(0, 0, 0, 0.3); }
+  .task-card.failed    { box-shadow: 0 0 0 2px rgba(198, 40, 40, 0.35),  0 1px 4px rgba(0, 0, 0, 0.3); }
+
+  .task-status-text { color: #9ca3af; }
+  .task-tool-name   { color: #e5e7eb; }
+  .task-timestamp   { color: #6b7280; }
+
+  .task-details-toggle { color: #93c5fd; }
+
+  .task-details-panel {
+    background: #16171e;
+    border-color: #3a3a4a;
+    color: #e5e7eb;
+  }
+
+  .task-status-row .spinner {
+    border-color: rgba(147, 197, 253, 0.3);
+    border-top-color: #93c5fd;
+  }
+
+  .btn-run     { background: #1b5e20; }
+  .btn-run:hover:not(:disabled) { background: #2e7d32; }
 }

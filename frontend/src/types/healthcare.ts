@@ -27,6 +27,7 @@ export type TaskType =
 // serializer lowercases the first letter of each property name
 // (e.g. PatientFirstName → patientFirstName).
 export interface HealthcareTask {
+  id: string;
   type: TaskType;
   patientFirstName: string;
   patientLastName: string;
@@ -41,4 +42,29 @@ export interface TranscribeResponse {
   transcription: string;
   /** Structured tasks extracted from the transcription by GPT-4o. */
   tasks: HealthcareTask[];
+}
+
+// Matches C# TaskExecutionStatus enum.
+export type TaskExecutionStatus = 'Running' | 'Completed' | 'Failed';
+
+// Matches C# TaskExecutionUpdate — pushed via SignalR as tasks execute.
+export interface TaskExecutionUpdate {
+  taskId: string;
+  status: TaskExecutionStatus;
+  toolName?: string;
+  message: string;
+  details?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  startedAt: string;
+  completedAt?: string;
+}
+
+// Sent to POST /api/tasks/execute.
+export interface TaskExecutionRequest {
+  taskId: string;
+  type: TaskType;
+  patientFirstName: string;
+  patientLastName: string;
+  description: string;
 }

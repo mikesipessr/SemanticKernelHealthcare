@@ -74,7 +74,7 @@ public class TaskClassificationService(IChatCompletionService chatCompletion, IL
           "type": one of ["MedicationRefill", "MedicationOrder", "ReferralOrder", "LabOrder"],
           "patientFirstName": string,
           "patientLastName": string,
-          "description": string (a complete sentence describing what needs to happen)
+          "description": string (concise clinical detail only — the test name, medication name, or specialty; no action verbs, no patient name)
         }
 
         Rules:

@@ -1,3 +1,14 @@
+// useTaskExecution — manages the SignalR connection and per-task execution state
+//
+// Responsibilities:
+//   - Opens a single HubConnection to /hubs/tasks on mount and closes it on unmount.
+//   - Maintains `executionState`: a map of taskId → latest TaskExecutionUpdate,
+//     used by TaskCard to render the correct visual state for each card.
+//   - Maintains `activityLog`: an append-only list of every update received,
+//     used by ActivityLog to show a timestamped feed of all agent events.
+//   - Exposes `runTasks` to fire a batch of tasks at the API and clear any
+//     stale execution state for those task IDs before the new run starts.
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { HubConnectionBuilder } from '@microsoft/signalr';
 import type { HubConnection } from '@microsoft/signalr';
@@ -20,8 +31,15 @@ export function useTaskExecution() {
     connection.on('TaskUpdated', (update: TaskExecutionUpdate) => {
       setExecutionState(prev => {
         const current = prev[update.taskId];
-        // If the card is already Completed with details, merge rather than overwrite:
-        // the summary message carries token counts but we want to keep the tool name + details.
+
+        // Two-phase completion merge:
+        // AgentOrchestrationService sends two Completed messages per task —
+        // the first (from SignalRInvocationFilter) carries ToolName + Details,
+        // the second carries token counts. If we blindly replaced the state,
+        // the second message would overwrite ToolName/Details with undefined.
+        // Instead, when both the incoming and current state are Completed, we
+        // merge: prefer the incoming values but fall back to the current ones
+        // for fields that aren't set in the new message.
         if (current?.status === 'Completed' && update.status === 'Completed') {
           return {
             ...prev,
@@ -35,6 +53,8 @@ export function useTaskExecution() {
         return { ...prev, [update.taskId]: update };
       });
 
+      // Every update goes into the activity log regardless of status,
+      // giving ActivityLog a full play-by-play of all agent events.
       setActivityLog(prev => [...prev, update]);
     });
 
@@ -45,6 +65,9 @@ export function useTaskExecution() {
   }, []);
 
   const runTasks = useCallback(async (requests: TaskExecutionRequest[]) => {
+    // Clear stale state for the tasks we're about to run so their cards
+    // reset to idle before the first SignalR update arrives. Without this,
+    // a re-run would briefly show the previous completed state.
     setExecutionState(prev => {
       const next = { ...prev };
       requests.forEach(r => delete next[r.taskId]);

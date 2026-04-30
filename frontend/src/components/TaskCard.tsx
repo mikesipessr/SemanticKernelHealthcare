@@ -1,6 +1,22 @@
+// TaskCard — displays a single healthcare task and its execution state
+//
+// Renders one of four visual states based on the `execution` prop:
+//
+//   idle      (execution is undefined)  — shows the ▶ Run button
+//   running   (status === 'Running')    — spinner + current tool name if known
+//   completed (status === 'Completed')  — checkmark, tool name, timestamp,
+//                                         token counts, collapsible JSON panel
+//   failed    (status === 'Failed')     — ✕ icon + error message
+//
+// The card CSS class (running / completed / failed) drives border/background
+// color changes defined in App.css.
+
 import { useState } from 'react';
 import type { HealthcareTask, TaskExecutionUpdate, TaskType } from '../types/healthcare';
 
+// Background colors for task type badges. Kept here rather than in CSS
+// so the mapping is colocated with the LABEL map and easy to extend when
+// new task types are added to the TaskType union.
 const BADGE_COLORS: Record<TaskType, string> = {
   MedicationRefill: '#2e7d32',
   MedicationOrder:  '#1565c0',
@@ -8,6 +24,7 @@ const BADGE_COLORS: Record<TaskType, string> = {
   LabOrder:         '#6a1b9a',
 };
 
+// Human-readable labels for each TaskType, used in the badge.
 const LABEL: Record<TaskType, string> = {
   MedicationRefill: 'Medication Refill',
   MedicationOrder:  'Medication Order',
@@ -25,6 +42,8 @@ function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+// Pretty-prints the JSON string returned by the tool, falling back to the
+// raw string if it isn't valid JSON (shouldn't happen, but defensive).
 function prettyJson(raw: string) {
   try { return JSON.stringify(JSON.parse(raw), null, 2); }
   catch { return raw; }
@@ -36,6 +55,8 @@ export function TaskCard({ task, execution, onRun }: TaskCardProps) {
   const patientName =
     [task.patientFirstName, task.patientLastName].filter(Boolean).join(' ') || 'Unknown Patient';
 
+  // Maps execution status to a CSS modifier class on the card wrapper.
+  // An absent execution prop (idle state) leaves the class empty.
   const statusClass = execution
     ? execution.status === 'Running'   ? 'running'
     : execution.status === 'Completed' ? 'completed'
@@ -52,6 +73,7 @@ export function TaskCard({ task, execution, onRun }: TaskCardProps) {
       <p className="task-description">{task.description}</p>
 
       {/* ── Execution status area ── */}
+
       {!execution && (
         <button className="btn btn-run" onClick={onRun}>
           ▶ Run
@@ -62,6 +84,7 @@ export function TaskCard({ task, execution, onRun }: TaskCardProps) {
         <div className="task-status-row">
           <span className="spinner" />
           <span className="task-status-text">
+            {/* Show which tool the agent is calling once the model has selected one. */}
             {execution.toolName ? `Calling ${execution.toolName}…` : 'Agent analyzing…'}
           </span>
         </div>

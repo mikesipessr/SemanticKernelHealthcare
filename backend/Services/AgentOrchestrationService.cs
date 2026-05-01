@@ -2,20 +2,27 @@
 // AgentOrchestrationService.cs — SK agent execution + SignalR updates
 //
 // This service receives a batch of TaskExecutionRequests and runs
-// each one concurrently on a background thread. For each task it:
+// each one concurrently on a background thread. For each task it
+// executes a three-phase pipeline via Semantic Kernel's agentic loop:
 //
-//   1. Clones the shared Kernel and imports HealthcarePlugin so
-//      the agent has access to the four healthcare tools.
-//   2. Attaches a SignalRInvocationFilter that intercepts each tool
-//      call and pushes real-time status updates to connected browsers.
-//   3. Sends a chat message to GPT-4o with FunctionChoiceBehavior.Auto,
-//      letting the model decide which tool matches the task.
-//   4. After the LLM call completes, patches token usage onto the
-//      final Completed message already sent by the filter.
+//   Phase 1 — Data Retrieval: one or two retrieval tool calls
+//   Phase 2 — Validation: one validation tool call
+//   Phase 3 — Execute or Warn: execution tool if validation passed,
+//             CreateClinicalWarning if validation returned a failure reason
 //
-// Registered as a Singleton in Program.cs because it holds no
-// per-request state — all per-task state lives in ExecuteSingleTaskAsync
-// local variables and the short-lived SignalRInvocationFilter instance.
+// SK's FunctionChoiceBehavior.Auto() handles the agentic loop internally:
+// after each tool result is appended to ChatHistory, SK calls the model
+// again until the model returns a response with no tool calls. The
+// system prompt drives which tools fire in which order.
+//
+// The SignalRInvocationFilter intercepts every tool call and sends a
+// Running-status SignalR update before each one fires, so the browser
+// can display step-by-step progress. The service owns all terminal
+// (Completed / Warned / Failed) sends.
+//
+// Registered as Singleton because it holds no per-request state —
+// all per-task state lives in ExecuteSingleTaskAsync locals and the
+// short-lived SignalRInvocationFilter instance.
 // ============================================================
 
 using Microsoft.AspNetCore.SignalR;
@@ -34,22 +41,43 @@ public class AgentOrchestrationService(
     ILogger<AgentOrchestrationService> logger)
     : IAgentOrchestrationService
 {
-    // The system prompt keeps the agent focused and predictable.
-    // "Use exactly one tool" prevents the model from chaining multiple
-    // calls or writing an explanation instead of invoking a function.
-    // "Do not explain" suppresses the conversational response the model
-    // sometimes adds after a successful tool call — we don't need prose,
-    // just the tool invocation.
+    // ------------------------------------------------------------
+    // System prompt — three-phase pipeline instructions
+    //
+    // The prompt explicitly maps each task type to the tools it
+    // should use at each phase. This prevents the model from
+    // guessing wrong tools or skipping phases during demos.
+    //
+    // The "if validationFailed is set" branch drives the Warned state:
+    // when a validation tool returns a non-null validationFailed, the
+    // model calls CreateClinicalWarning instead of the execution tool,
+    // and the filter sets WarnWasIssued so the service sends Warned.
+    // ------------------------------------------------------------
     private const string SystemPrompt =
-        "You are a healthcare workflow agent. You will be given a task description for a patient. " +
-        "Use exactly one of the available tools to complete the task based on its type. " +
-        "After calling the tool, confirm the action was completed. Do not explain — just invoke the tool.";
+        "You are a healthcare workflow agent. Execute every task in exactly three sequential phases.\n\n" +
+        "PHASE 1 — DATA RETRIEVAL: Call the retrieval tool(s) for this task type:\n" +
+        "  MedicationRefill / MedicationOrder: call GetPatientMedications AND GetPatientAllergies\n" +
+        "  LabOrder:       call GetPastLabOrders\n" +
+        "  ReferralOrder:  call GetPatientDemographics AND GetInsuranceCoverage\n\n" +
+        "PHASE 2 — VALIDATION: Call the validation tool for this task type:\n" +
+        "  MedicationRefill: call ValidateMedicationRefill\n" +
+        "  MedicationOrder:  call CheckDrugInteractions\n" +
+        "  LabOrder:         call ValidateLabOrderIndication\n" +
+        "  ReferralOrder:    call ValidateReferralAuthorization\n\n" +
+        "PHASE 3 — EXECUTE OR WARN: Examine the validation result's validationFailed field:\n" +
+        "  If validationFailed is null  → call the execution tool for this task type.\n" +
+        "  If validationFailed is set   → call CreateClinicalWarning with patientName and " +
+        "the validationFailed value as the reason. Do NOT call the execution tool.\n\n" +
+        "Execution tools by task type: MedicationRefill→RefillPrescription, " +
+        "MedicationOrder→CreateMedicationOrder, LabOrder→SubmitLabOrder, " +
+        "ReferralOrder→SubmitReferralOrder.\n\n" +
+        "Call tools in order. Do not skip phases. Do not explain — just invoke tools.";
 
     public Task ExecuteTasksAsync(IEnumerable<TaskExecutionRequest> requests)
     {
         // Each task gets its own background thread. Task.Run is intentional
         // here — we want true parallelism, not cooperative async scheduling,
-        // because each task blocks for ~1.5s on the simulated tool delay.
+        // because each task blocks for multiple seconds across tool delays.
         foreach (var req in requests)
             _ = Task.Run(() => ExecuteSingleTaskAsync(req));
 
@@ -65,7 +93,7 @@ public class AgentOrchestrationService(
         {
             TaskId    = req.TaskId,
             Status    = TaskExecutionStatus.Running,
-            Message   = "Agent is analyzing the task...",
+            Message   = "Agent initializing multi-step pipeline…",
             StartedAt = startedAt
         });
 
@@ -74,32 +102,25 @@ public class AgentOrchestrationService(
             // ------------------------------------------------------------
             // Kernel setup
             //
-            // We resolve the Kernel from a new DI scope rather than
-            // injecting it directly. The Kernel itself is registered as
-            // Singleton, but IServiceScopeFactory lets us create a short-
-            // lived scope that correctly resolves any Scoped dependencies
-            // the Kernel or its services might have.
-            //
             // Kernel.Clone() creates a shallow copy with its own plugin
-            // collection and filter list, so tasks can't interfere with
-            // each other's plugin state when running concurrently.
+            // collection and filter list so concurrent tasks don't share state.
+            // We resolve Kernel from a new DI scope rather than injecting
+            // it directly because the service is Singleton but Kernel may
+            // have Scoped dependencies.
             // ------------------------------------------------------------
-            using var scope      = scopeFactory.CreateScope();
-            var kernel           = scope.ServiceProvider.GetRequiredService<Kernel>();
-            var taskKernel       = kernel.Clone();
+            using var scope  = scopeFactory.CreateScope();
+            var kernel       = scope.ServiceProvider.GetRequiredService<Kernel>();
+            var taskKernel   = kernel.Clone();
             taskKernel.ImportPluginFromObject(new HealthcarePlugin(), "Healthcare");
 
             // ------------------------------------------------------------
             // Invocation filter
             //
             // SignalRInvocationFilter implements IAutoFunctionInvocationFilter,
-            // which SK calls before and after every tool invocation the model
-            // decides to make. We use it to push real-time "Calling X..." and
-            // "X completed" SignalR messages without polling.
-            //
-            // The filter also caches the tool name, result, and completion
-            // timestamp so the service can re-send a final Completed message
-            // with token counts attached (see two-phase completion below).
+            // which SK calls before each tool the model decides to invoke.
+            // The filter sends a Running SignalR update per tool call and
+            // caches the final tool's result for the service to use in the
+            // terminal send. It also flags if CreateClinicalWarning was called.
             // ------------------------------------------------------------
             var filter = new SignalRInvocationFilter(req.TaskId, startedAt, hubContext);
             taskKernel.AutoFunctionInvocationFilters.Add(filter);
@@ -110,24 +131,27 @@ public class AgentOrchestrationService(
                 $"Task type: {req.Type}\nPatient: {patientName}\nDescription: {req.Description}");
 
             // ------------------------------------------------------------
-            // FunctionChoiceBehavior.Auto — agentic tool selection
+            // FunctionChoiceBehavior.Auto — agentic multi-step loop
             //
-            // With Auto(), the model decides whether to call a tool and
-            // which one, based on the task description and the tool schemas
-            // from HealthcarePlugin. Temperature = 0 keeps selection
-            // deterministic — there's no creativity needed here.
+            // Auto() enables SK's internal agentic loop: after each tool
+            // result is appended to ChatHistory, the model is called again.
+            // The loop continues until the model returns a response with no
+            // tool calls. The system prompt controls how many tools fire
+            // and in what order — no manual loop code is needed here.
             //
-            // SKEXP0001 suppression: FunctionChoiceBehavior is still marked
-            // experimental in the current SK release. We suppress the warning
-            // locally rather than globally because the rest of the codebase
-            // doesn't use experimental APIs.
+            // MaxTokens is set to 2000 (up from 500) because the chat history
+            // grows with each appended tool result across the multi-step pipeline.
+            // This caps the model's output tokens per turn, not the input.
+            //
+            // SKEXP0001: FunctionChoiceBehavior is experimental in the current
+            // SK release. Suppressed locally to avoid polluting the whole file.
             // ------------------------------------------------------------
 #pragma warning disable SKEXP0001
             var settings = new OpenAIPromptExecutionSettings
             {
                 FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(),
                 Temperature            = 0.0,
-                MaxTokens              = 500
+                MaxTokens              = 2000
             };
 #pragma warning restore SKEXP0001
 
@@ -136,12 +160,10 @@ public class AgentOrchestrationService(
             // ------------------------------------------------------------
             // Token usage extraction
             //
-            // The SDK doesn't expose token counts via a typed property;
-            // they're buried in the response metadata dictionary under
-            // the key "Usage". We use reflection to read InputTokenCount
-            // and OutputTokenCount from whatever object the connector puts
-            // there. This is brittle against SDK changes, but token counts
-            // are optional display info — failures are silently swallowed.
+            // Token counts live in the response metadata under "Usage".
+            // We use reflection to read them because the type isn't directly
+            // accessible via the public SK API. Failures are silently swallowed
+            // because token counts are optional display info.
             // ------------------------------------------------------------
             int? promptTokens = null, completionTokens = null;
             var lastMsg = responses.LastOrDefault();
@@ -157,24 +179,16 @@ public class AgentOrchestrationService(
             catch { /* token info is optional */ }
 
             // ------------------------------------------------------------
-            // Two-phase completion
+            // Single terminal send
             //
-            // When a tool is called, SignalRInvocationFilter sends its own
-            // Completed message that carries ToolName and Details. If we
-            // then sent a second Completed message here, it would overwrite
-            // those fields on the frontend with nulls.
-            //
-            // Instead:
-            //   - If no tool ran (ToolWasCalled = false), we send a generic
-            //     Completed. This shouldn't happen given the system prompt,
-            //     but it's a safe fallback.
-            //   - If a tool ran (ToolWasCalled = true), we re-send the
-            //     filter's cached data plus the token counts. The frontend
-            //     merges the two Completed messages rather than replacing,
-            //     so ToolName and Details are preserved.
+            // The filter sends only Running messages. The service always
+            // owns the one Completed / Warned / Failed terminal message,
+            // so token counts are always included and there is no two-phase
+            // merge needed on the frontend.
             // ------------------------------------------------------------
             if (!filter.ToolWasCalled)
             {
+                // Shouldn't happen given the system prompt, but defensive fallback.
                 await Send(new TaskExecutionUpdate
                 {
                     TaskId           = req.TaskId,
@@ -183,22 +197,44 @@ public class AgentOrchestrationService(
                     PromptTokens     = promptTokens,
                     CompletionTokens = completionTokens,
                     StartedAt        = startedAt,
-                    CompletedAt      = DateTime.UtcNow
+                    CompletedAt      = DateTime.UtcNow,
+                    TotalSteps       = filter.StepCount
                 });
             }
-            else
+            else if (filter.WarnWasIssued)
             {
+                // Validation failed — the agent called CreateClinicalWarning.
+                // Details contains the warning JSON (warningId, reason, severity, requiresReview).
                 await Send(new TaskExecutionUpdate
                 {
                     TaskId           = req.TaskId,
-                    Status           = TaskExecutionStatus.Completed,
-                    Message          = filter.LastCompletionMessage,
+                    Status           = TaskExecutionStatus.Warned,
+                    Message          = "Clinical warning issued — action could not be completed safely.",
                     ToolName         = filter.LastToolName,
                     Details          = filter.LastDetails,
                     PromptTokens     = promptTokens,
                     CompletionTokens = completionTokens,
                     StartedAt        = startedAt,
-                    CompletedAt      = filter.LastCompletedAt ?? DateTime.UtcNow
+                    CompletedAt      = filter.LastCompletedAt ?? DateTime.UtcNow,
+                    TotalSteps       = filter.StepCount
+                });
+            }
+            else
+            {
+                // Validation passed — the agent called the execution tool.
+                // Details contains the execution result (e.g., pharmacy confirmation JSON).
+                await Send(new TaskExecutionUpdate
+                {
+                    TaskId           = req.TaskId,
+                    Status           = TaskExecutionStatus.Completed,
+                    Message          = $"{filter.LastToolName} completed successfully.",
+                    ToolName         = filter.LastToolName,
+                    Details          = filter.LastDetails,
+                    PromptTokens     = promptTokens,
+                    CompletionTokens = completionTokens,
+                    StartedAt        = startedAt,
+                    CompletedAt      = filter.LastCompletedAt ?? DateTime.UtcNow,
+                    TotalSteps       = filter.StepCount
                 });
             }
         }
@@ -224,17 +260,16 @@ public class AgentOrchestrationService(
 // SignalRInvocationFilter — IAutoFunctionInvocationFilter impl
 //
 // SK calls OnAutoFunctionInvocationAsync around every tool call
-// the model decides to make. This filter uses that hook to push
-// two SignalR messages per tool call:
+// the model makes during the agentic loop. This filter uses that
+// hook to push a Running SignalR update before each tool fires,
+// giving the browser a step-by-step view of the agent's progress.
 //
-//   Before next(context): "Calling <ToolName>..." (status = Running)
-//   After  next(context): "<ToolName> completed." (status = Completed)
-//                          + the raw JSON result in Details
+// The filter does NOT send Completed messages — only the service
+// does, once, after the full pipeline finishes (with token counts).
 //
-// The filter also caches the last tool's name, result, and timestamp
-// so AgentOrchestrationService can re-send a final Completed message
-// with token counts patched in (token counts aren't available until
-// after GetChatMessageContentsAsync returns, which is after the filter).
+// Cached values (LastToolName, LastDetails, LastCompletedAt) let
+// the service include the final tool's result in the terminal send
+// without needing a second SignalR round-trip.
 // ============================================================
 internal sealed class SignalRInvocationFilter(
     string taskId,
@@ -242,17 +277,24 @@ internal sealed class SignalRInvocationFilter(
     IHubContext<TaskExecutionHub> hubContext)
     : IAutoFunctionInvocationFilter
 {
-    // True once the filter has fired at least once for this task.
-    // Used by AgentOrchestrationService to decide whether to send
-    // a generic fallback Completed or to patch token counts onto
-    // the filter's already-sent Completed message.
+    private int _stepNumber = 0;
+
+    // True once any tool has been called. Used by the service to
+    // detect the unexpected case where the model made no tool calls.
     public bool ToolWasCalled { get; private set; }
 
-    // Cached values from the last tool invocation, re-sent with
-    // token counts by AgentOrchestrationService after LLM call returns.
+    // True if the last tool called was CreateClinicalWarning.
+    // Signals the service to send Warned instead of Completed.
+    public bool WarnWasIssued { get; private set; }
+
+    // The actual number of tool calls made across the full pipeline.
+    // MedicationRefill/MedicationOrder = 4 steps; LabOrder/ReferralOrder = 3 steps.
+    // Used by the service for TotalSteps on the terminal message.
+    public int StepCount => _stepNumber;
+
+    // Cached from the last tool invocation, included in the terminal send.
     public string? LastToolName { get; private set; }
     public string? LastDetails { get; private set; }
-    public string LastCompletionMessage { get; private set; } = "";
     public DateTime? LastCompletedAt { get; private set; }
 
     public async Task OnAutoFunctionInvocationAsync(
@@ -260,43 +302,30 @@ internal sealed class SignalRInvocationFilter(
         Func<AutoFunctionInvocationContext, Task> next)
     {
         ToolWasCalled = true;
-        var toolName  = context.Function.Name;
+        _stepNumber++;
+        var toolName = context.Function.Name;
 
-        // Notify the browser the agent has chosen a tool and is calling it.
+        // Notify the browser which tool is about to run and which step we're on.
         await hubContext.Clients.All.SendAsync("TaskUpdated", new TaskExecutionUpdate
         {
-            TaskId    = taskId,
-            Status    = TaskExecutionStatus.Running,
-            ToolName  = toolName,
-            Message   = $"Calling {toolName}...",
-            StartedAt = startedAt
+            TaskId     = taskId,
+            Status     = TaskExecutionStatus.Running,
+            ToolName   = toolName,
+            Message    = $"Step {_stepNumber}: Calling {toolName}…",
+            StepNumber = _stepNumber,
+            StartedAt  = startedAt
         });
 
-        // Execute the actual KernelFunction (e.g. RefillPrescriptionAsync).
+        // Execute the actual KernelFunction (e.g. ValidateMedicationRefill).
         await next(context);
 
-        var details     = context.Result?.GetValue<string>() ?? "{}";
-        var completedAt = DateTime.UtcNow;
-        var message     = $"{toolName} completed successfully.";
+        // Cache result for the service's terminal send.
+        LastToolName    = toolName;
+        LastDetails     = context.Result?.GetValue<string>() ?? "{}";
+        LastCompletedAt = DateTime.UtcNow;
 
-        // Cache for AgentOrchestrationService to re-send with token counts.
-        LastToolName          = toolName;
-        LastDetails           = details;
-        LastCompletionMessage = message;
-        LastCompletedAt       = completedAt;
-
-        // Push the initial Completed message. It has ToolName and Details
-        // but no token counts yet — those arrive after GetChatMessageContentsAsync
-        // returns and will be merged in by a second push from the service.
-        await hubContext.Clients.All.SendAsync("TaskUpdated", new TaskExecutionUpdate
-        {
-            TaskId      = taskId,
-            Status      = TaskExecutionStatus.Completed,
-            ToolName    = toolName,
-            Message     = message,
-            Details     = details,
-            StartedAt   = startedAt,
-            CompletedAt = completedAt
-        });
+        // Track whether the pipeline ended in a warning rather than an execution.
+        if (toolName == "CreateClinicalWarning")
+            WarnWasIssued = true;
     }
 }

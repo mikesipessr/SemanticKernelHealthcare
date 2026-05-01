@@ -200,6 +200,13 @@
   animation: shimmer 1.2s infinite;
 }
 
+.transcription-status {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  color: #888;
+  font-style: italic;
+}
+
 @keyframes shimmer {
   0%   { background-position: 200% 0; }
   100% { background-position: -200% 0; }
@@ -310,6 +317,11 @@
   box-shadow: 0 0 0 2px rgba(198, 40, 40, 0.2), 0 1px 4px rgba(0, 0, 0, 0.06);
 }
 
+.task-card.warned {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2), 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
 /* ── Status rows ── */
 .task-status-row {
   display: flex;
@@ -331,6 +343,17 @@
 
 .task-error-text {
   color: #c62828;
+}
+
+.task-warning-reason {
+  color: #92400e;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: 0;
+  padding: 6px 10px;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 5px;
 }
 
 .task-tool-name {
@@ -365,6 +388,11 @@
 
 .status-error {
   background: #c62828;
+  color: #fff;
+}
+
+.status-warned {
+  background: #f59e0b;
   color: #fff;
 }
 
@@ -495,6 +523,7 @@
 .log-icon-running  { color: #58a6ff; }
 .log-icon-success  { color: #3fb950; }
 .log-icon-error    { color: #f85149; }
+.log-icon-warned   { color: #f59e0b; }
 
 .log-label {
   color: #8b949e;
@@ -504,6 +533,7 @@
 .log-entry-running .log-message   { color: #58a6ff; }
 .log-entry-completed .log-message { color: #3fb950; }
 .log-entry-failed .log-message    { color: #f85149; }
+.log-entry-warned .log-message    { color: #f59e0b; }
 
 .log-message {
   flex: 1;
@@ -587,6 +617,7 @@
   }
 
   .task-token-count { background: #2a2b38; color: #6b7280; }
+  .transcription-status { color: #6b7280; }
 
   .activity-log-header h2 { color: #e5e7eb; }
   .activity-log-clear { background: #2a2b38; }
@@ -595,6 +626,9 @@
   .task-card.running   { box-shadow: 0 0 0 2px rgba(21, 101, 192, 0.35), 0 1px 4px rgba(0, 0, 0, 0.3); }
   .task-card.completed { box-shadow: 0 0 0 2px rgba(46, 125, 50, 0.35),  0 1px 4px rgba(0, 0, 0, 0.3); }
   .task-card.failed    { box-shadow: 0 0 0 2px rgba(198, 40, 40, 0.35),  0 1px 4px rgba(0, 0, 0, 0.3); }
+  .task-card.warned    { box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.35), 0 1px 4px rgba(0, 0, 0, 0.3); }
+
+  .task-warning-reason { color: #fcd34d; background: #1c1408; border-color: #78350f; }
 
   .task-status-text { color: #9ca3af; }
   .task-tool-name   { color: #e5e7eb; }

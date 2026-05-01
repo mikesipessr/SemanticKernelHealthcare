@@ -1,15 +1,17 @@
 // TaskCard — displays a single healthcare task and its execution state
 //
-// Renders one of four visual states based on the `execution` prop:
+// Renders one of five visual states based on the `execution` prop:
 //
 //   idle      (execution is undefined)  — shows the ▶ Run button
-//   running   (status === 'Running')    — spinner + current tool name if known
-//   completed (status === 'Completed')  — checkmark, tool name, timestamp,
-//                                         token counts, collapsible JSON panel
+//   running   (status === 'Running')    — spinner + "Step N: Calling X…"
+//   completed (status === 'Completed')  — ✓ icon, tool name, timestamp,
+//                                         token counts, collapsible result JSON
+//   warned    (status === 'Warned')     — ⚠ icon, "Clinical Warning" label,
+//                                         reason text, collapsible warning JSON
 //   failed    (status === 'Failed')     — ✕ icon + error message
 //
-// The card CSS class (running / completed / failed) drives border/background
-// color changes defined in App.css.
+// The card CSS class (running / completed / warned / failed) drives
+// border and glow color changes defined in App.css.
 
 import { useState } from 'react';
 import type { HealthcareTask, TaskExecutionUpdate, TaskType } from '../types/healthcare';
@@ -60,6 +62,7 @@ export function TaskCard({ task, execution, onRun }: TaskCardProps) {
   const statusClass = execution
     ? execution.status === 'Running'   ? 'running'
     : execution.status === 'Completed' ? 'completed'
+    : execution.status === 'Warned'    ? 'warned'
     : 'failed'
     : '';
 
@@ -84,8 +87,12 @@ export function TaskCard({ task, execution, onRun }: TaskCardProps) {
         <div className="task-status-row">
           <span className="spinner" />
           <span className="task-status-text">
-            {/* Show which tool the agent is calling once the model has selected one. */}
-            {execution.toolName ? `Calling ${execution.toolName}…` : 'Agent analyzing…'}
+            {/* Show "Step N: Calling X…" when stepNumber is present (tool calls),
+                or a plain message for the initial "Agent initializing…" update. */}
+            {execution.stepNumber
+              ? `Step ${execution.stepNumber}: ${execution.toolName ? `Calling ${execution.toolName}…` : 'Working…'}`
+              : execution.toolName ? `Calling ${execution.toolName}…` : 'Agent analyzing…'
+            }
           </span>
         </div>
       )}
@@ -104,6 +111,7 @@ export function TaskCard({ task, execution, onRun }: TaskCardProps) {
               <span className="task-token-count">
                 {execution.promptTokens ?? 0}↑ &nbsp;{execution.completionTokens ?? 0}↓
                 &nbsp;=&nbsp;{(execution.promptTokens ?? 0) + (execution.completionTokens ?? 0)} tokens
+                {execution.totalSteps != null && ` · ${execution.totalSteps} steps`}
               </span>
             </div>
           )}
@@ -114,6 +122,41 @@ export function TaskCard({ task, execution, onRun }: TaskCardProps) {
                 onClick={() => setShowDetails(v => !v)}
               >
                 {showDetails ? '▲ Hide details' : '▼ Show details'}
+              </button>
+              {showDetails && (
+                <pre className="task-details-panel">{prettyJson(execution.details)}</pre>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {execution?.status === 'Warned' && (
+        <div className="task-result task-result-warned">
+          <div className="task-status-row">
+            <span className="status-icon status-warned">⚠</span>
+            <span className="task-tool-name">Clinical Warning</span>
+            {execution.completedAt && (
+              <span className="task-timestamp">{formatTime(execution.completedAt)}</span>
+            )}
+          </div>
+          <p className="task-warning-reason">{execution.message}</p>
+          {(execution.promptTokens != null || execution.completionTokens != null) && (
+            <div className="task-token-row">
+              <span className="task-token-count">
+                {execution.promptTokens ?? 0}↑ &nbsp;{execution.completionTokens ?? 0}↓
+                &nbsp;=&nbsp;{(execution.promptTokens ?? 0) + (execution.completionTokens ?? 0)} tokens
+                {execution.totalSteps != null && ` · ${execution.totalSteps} steps`}
+              </span>
+            </div>
+          )}
+          {execution.details && (
+            <>
+              <button
+                className="task-details-toggle"
+                onClick={() => setShowDetails(v => !v)}
+              >
+                {showDetails ? '▲ Hide validation details' : '▼ Show validation details'}
               </button>
               {showDetails && (
                 <pre className="task-details-panel">{prettyJson(execution.details)}</pre>

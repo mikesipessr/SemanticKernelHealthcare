@@ -14,6 +14,8 @@
 // ============================================================
 
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
+using SemanticKernelHealthcare.Api.Hubs;
 using SemanticKernelHealthcare.Api.Models;
 using SemanticKernelHealthcare.Api.Services;
 
@@ -28,7 +30,10 @@ namespace SemanticKernelHealthcare.Api.Controllers;
 // controller. Action-level route attributes are appended to this.
 [ApiController]
 [Route("api/audio")]
-public class AudioController(ITranscriptionService transcription, ITaskClassificationService classification)
+public class AudioController(
+    ITranscriptionService transcription,
+    ITaskClassificationService classification,
+    IHubContext<TaskExecutionHub> hubContext)
     : ControllerBase
 {
     // ----------------------------------------------------------
@@ -43,6 +48,10 @@ public class AudioController(ITranscriptionService transcription, ITaskClassific
     // OpenAI's hard limit for the Whisper transcription endpoint.
     // Without this, a very large file would reach OpenAI's API and
     // fail there instead of being rejected early with a clear error.
+    //
+    // SignalR progress pushes: two "TranscriptionStatus" messages are
+    // sent during processing so the browser can show what stage is
+    // running without waiting for the full HTTP response to complete.
     // ----------------------------------------------------------
     [HttpPost("transcribe")]
     [RequestSizeLimit(26_214_400)] // 25 MB = 26,214,400 bytes
@@ -61,17 +70,21 @@ public class AudioController(ITranscriptionService transcription, ITaskClassific
         // internally once it knows the full size it needs.
         await using var stream = audio.OpenReadStream();
 
-        // Step 1: Speech-to-text via Semantic Kernel + OpenAI Whisper.
-        // We pass the MIME type (e.g. "audio/webm") so the service can
-        // tell Whisper which audio format to expect.
+        // Step 1: Notify the browser that Whisper is running, then transcribe.
+        await hubContext.Clients.All.SendAsync("TranscriptionStatus",
+            new { message = "Transcribing audio with Whisper…", stage = "transcribing" }, ct);
+
         var text = await transcription.TranscribeAsync(stream, audio.ContentType, ct);
 
-        // Step 2: Extract structured HealthcareTask objects from the
-        // transcription text using GPT-4o via Semantic Kernel.
+        // Step 2: Push the completed transcription text immediately so the
+        // browser can display it while GPT-4o extracts tasks in the background.
+        await hubContext.Clients.All.SendAsync("TranscriptionStatus",
+            new { message = "Extracting structured tasks with GPT-4o…", stage = "classifying", transcription = text }, ct);
+
         var tasks = await classification.ClassifyAsync(text, ct);
 
-        // Return both results together. The frontend displays the raw
-        // transcription text and renders a card for each task.
+        // Return both results together. The HTTP response is still the
+        // source of truth for the final state — SignalR is for progress only.
         return Ok(new TranscribeResponse { Transcription = text, Tasks = tasks });
     }
 }

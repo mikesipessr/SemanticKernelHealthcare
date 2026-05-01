@@ -1,12 +1,16 @@
 // ActivityLog — real-time timestamped feed of all agent events
 //
 // Receives every TaskExecutionUpdate pushed via SignalR and renders
-// them as a scrolling list. Each entry shows:
+// them as a scrolling list. For the multi-step pipeline, each task
+// produces several entries: one per tool call (Running) plus one
+// terminal (Completed / Warned / Failed).
+//
+// Each entry shows:
 //   - Timestamp (from startedAt)
-//   - Status icon (running ⟳ / completed ✓ / failed ✕)
-//   - A human-readable label derived from the task's type and patient name
-//   - A short message describing what happened (tool call, completion, etc.)
-//   - Token counts on Completed entries that include them
+//   - Status icon (⟳ running / ✓ completed / ⚠ warned / ✕ failed)
+//   - A human-readable label derived from the task type and patient name
+//   - A message with step number prefix for tool-call entries
+//   - Token counts on terminal Completed entries
 //
 // The log auto-scrolls to the bottom as new entries arrive.
 
@@ -40,11 +44,12 @@ function taskLabel(taskId: string, tasks: HealthcareTask[]) {
 function entryIcon(entry: TaskExecutionUpdate) {
   if (entry.status === 'Failed')    return <span className="log-icon log-icon-error">✕</span>;
   if (entry.status === 'Completed') return <span className="log-icon log-icon-success">✓</span>;
+  if (entry.status === 'Warned')    return <span className="log-icon log-icon-warned">⚠</span>;
   return <span className="log-icon log-icon-running">⟳</span>;
 }
 
-// Renders token counts as a small badge on Completed entries.
-// Returns null if neither count is present (e.g. on Running updates).
+// Renders token counts as a small badge on terminal Completed entries.
+// Returns null if neither count is present.
 function tokenBadge(entry: TaskExecutionUpdate) {
   if (entry.promptTokens == null && entry.completionTokens == null) return null;
   const total = (entry.promptTokens ?? 0) + (entry.completionTokens ?? 0);
@@ -53,6 +58,25 @@ function tokenBadge(entry: TaskExecutionUpdate) {
       {entry.promptTokens ?? 0}↑ {entry.completionTokens ?? 0}↓ = {total} tokens
     </span>
   );
+}
+
+// Formats the message column for a log entry.
+// Running entries with stepNumber show "→ [Step N] Calling X…";
+// Warned entries show "⚠ <message>"; others follow existing arrow conventions.
+function logMessage(entry: TaskExecutionUpdate): string {
+  const step = entry.stepNumber ? `[Step ${entry.stepNumber}] ` : '';
+  if (entry.status === 'Running') {
+    return entry.toolName
+      ? `→ ${step}Calling ${entry.toolName}…`
+      : entry.message;
+  }
+  if (entry.status === 'Completed') {
+    return entry.toolName
+      ? `← ${entry.toolName} completed`
+      : entry.message;
+  }
+  if (entry.status === 'Warned') return `⚠ ${entry.message}`;
+  return entry.message; // Failed
 }
 
 export function ActivityLog({ entries, tasks, onClear }: ActivityLogProps) {
@@ -86,13 +110,7 @@ export function ActivityLog({ entries, tasks, onClear }: ActivityLogProps) {
             <span className="log-time">{formatTime(entry.startedAt)}</span>
             {entryIcon(entry)}
             <span className="log-label">[{taskLabel(entry.taskId, tasks)}]</span>
-            <span className="log-message">
-              {/* Show directional arrows for tool calls to make the log easier to scan:
-                  → means the agent is calling the tool, ← means it returned. */}
-              {entry.toolName && entry.status === 'Running'   && `→ Calling ${entry.toolName}…`}
-              {entry.toolName && entry.status === 'Completed' && `← ${entry.toolName} completed`}
-              {!entry.toolName && entry.message}
-            </span>
+            <span className="log-message">{logMessage(entry)}</span>
             {entry.status === 'Completed' && tokenBadge(entry)}
           </div>
         ))}

@@ -30,12 +30,13 @@ function App() {
   } = useAudioRecorder();
 
   const level = useLevelMeter(analyserNode);
-  const { executionState, activityLog, runTasks, clearLog } = useTaskExecution();
+  const { executionState, activityLog, runTasks, clearLog, transcriptionStatus, clearTranscriptionStatus } = useTaskExecution();
 
   const isProcessing = state === 'processing';
 
   const handleStop = async () => {
     setApiError(null);
+    clearTranscriptionStatus();
     try {
       const blob = await stopRecording();
       const result = await transcribeAudio(blob);
@@ -63,7 +64,7 @@ function App() {
     const requests: TaskExecutionRequest[] = tasks
       .filter(t => {
         const s = executionState[t.id]?.status;
-        return s !== 'Completed' && s !== 'Running';
+        return s !== 'Completed' && s !== 'Running' && s !== 'Warned';
       })
       .map(t => ({
         taskId:           t.id,
@@ -102,7 +103,11 @@ function App() {
           {error && <p className="error-message">{error}</p>}
         </section>
 
-        <TranscriptionDisplay text={transcription} loading={isProcessing} />
+        <TranscriptionDisplay
+          text={transcription}
+          loading={isProcessing}
+          transcriptionStatus={transcriptionStatus}
+        />
 
         {tasks.length > 0 && (
           <section className="tasks-section">

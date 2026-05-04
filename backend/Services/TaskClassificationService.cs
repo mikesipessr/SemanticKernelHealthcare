@@ -71,16 +71,23 @@ public class TaskClassificationService(IChatCompletionService chatCompletion, IL
 
         Each element must match this schema exactly:
         {
-          "type": one of ["MedicationRefill", "MedicationOrder", "ReferralOrder", "LabOrder"],
+          "type": one of ["MedicationRefill", "MedicationOrder", "ReferralOrder", "LabOrder", "LabResultReview"],
           "patientFirstName": string,
           "patientLastName": string,
           "description": string (concise clinical detail only — the test name, medication name, or specialty; no action verbs, no patient name)
         }
 
-        Rules:
-        - If no tasks are present, return an empty array: []
-        - Only include tasks that clearly fit one of the four task types.
+        Task type rules:
+        - MedicationRefill: patient needs a refill of an existing prescription.
+        - MedicationOrder: a new medication needs to be prescribed.
+        - ReferralOrder: patient needs to be referred to a specialist.
+        - LabOrder: new laboratory tests need to be ordered (not yet run).
+        - LabResultReview: lab results have already come back and need clinical review
+          (look for phrases like "results came back", "labs are abnormal", "values are elevated/low",
+          "critical value", "need to review the labs").
+        - Only include tasks that clearly fit one of the five task types.
         - Do not invent patient names; use empty string if a name is not mentioned.
+        - If no tasks are present, return an empty array: []
         """;
 
     public async Task<List<HealthcareTask>> ClassifyAsync(string transcription, CancellationToken ct = default)

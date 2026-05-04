@@ -42,9 +42,10 @@ function taskLabel(taskId: string, tasks: HealthcareTask[]) {
 }
 
 function entryIcon(entry: TaskExecutionUpdate) {
-  if (entry.status === 'Failed')    return <span className="log-icon log-icon-error">✕</span>;
-  if (entry.status === 'Completed') return <span className="log-icon log-icon-success">✓</span>;
-  if (entry.status === 'Warned')    return <span className="log-icon log-icon-warned">⚠</span>;
+  if (entry.status === 'Failed')          return <span className="log-icon log-icon-error">✕</span>;
+  if (entry.status === 'Completed')       return <span className="log-icon log-icon-success">✓</span>;
+  if (entry.status === 'Warned')          return <span className="log-icon log-icon-warned">⚠</span>;
+  if (entry.messageType === 'Reasoning')  return <span className="log-icon log-icon-reasoning">✦</span>;
   return <span className="log-icon log-icon-running">⟳</span>;
 }
 
@@ -64,6 +65,7 @@ function tokenBadge(entry: TaskExecutionUpdate) {
 // Running entries with stepNumber show "→ [Step N] Calling X…";
 // Warned entries show "⚠ <message>"; others follow existing arrow conventions.
 function logMessage(entry: TaskExecutionUpdate): string {
+  if (entry.messageType === 'Reasoning') return entry.message;
   const step = entry.stepNumber ? `[Step ${entry.stepNumber}] ` : '';
   if (entry.status === 'Running') {
     return entry.toolName
@@ -106,7 +108,7 @@ export function ActivityLog({ entries, tasks, onClear }: ActivityLogProps) {
         )}
 
         {entries.map((entry, i) => (
-          <div key={i} className={`log-entry log-entry-${entry.status.toLowerCase()}`}>
+          <div key={i} className={`log-entry ${entry.messageType === 'Reasoning' ? 'log-entry-reasoning' : `log-entry-${entry.status.toLowerCase()}`}`}>
             <span className="log-time">{formatTime(entry.startedAt)}</span>
             {entryIcon(entry)}
             <span className="log-label">[{taskLabel(entry.taskId, tasks)}]</span>

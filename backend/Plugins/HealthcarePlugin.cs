@@ -51,6 +51,11 @@ public class HealthcarePlugin
     private static readonly Random _rng = new();
 
     // ── Phase 1: Data Retrieval ──────────────────────────────
+    //
+    // GetLabResults is used exclusively for LabOrder tasks. It returns
+    // actual measured values with reference ranges and abnormality flags
+    // so the agent can reason about clinical significance rather than
+    // just validating a binary pass/fail.
 
     [KernelFunction("GetPatientMedications")]
     [Description("Retrieves the current active medication list for a patient from the EHR.")]
@@ -130,6 +135,143 @@ public class HealthcarePlugin
                 }
             },
             retrievedAt = DateTime.UtcNow.ToString("o")
+        };
+        return JsonSerializer.Serialize(result);
+    }
+
+    [KernelFunction("GetLabResults")]
+    [Description("Retrieves a complete laboratory panel including measured values, reference ranges, and abnormality flags (HIGH/LOW/CRITICAL). Use for LabOrder tasks — results are meant to be analyzed and reasoned about, not just validated.")]
+    public async Task<string> GetLabResultsAsync(
+        [Description("Full name of the patient")] string patientName)
+    {
+        await Task.Delay(850);
+
+        // Three distinct clinical scenarios chosen randomly so every demo
+        // run shows a different decision path. Jitter keeps numbers realistic.
+        double Jitter(double v) => Math.Round(v + (_rng.NextDouble() - 0.5) * 0.6, 1);
+
+        var scenario = _rng.Next(3);
+
+        object[] results = scenario switch
+        {
+            // Scenario 0 — CRITICAL values across multiple analytes.
+            // Combined picture (leukocytosis + severe anemia + thrombocytopenia +
+            // hyperkalemia + elevated creatinine) → should trigger EscalateCriticalLabValues.
+            0 => new object[]
+            {
+                new { analyte = "WBC",        value = Jitter(19.2), unit = "K/uL",   referenceRange = "4.0–11.0",  flag = "CRITICAL" },
+                new { analyte = "Hgb",        value = Jitter(5.8),  unit = "g/dL",   referenceRange = "12.0–16.0", flag = "CRITICAL" },
+                new { analyte = "Platelets",  value = Jitter(38.0), unit = "K/uL",   referenceRange = "150–400",   flag = "CRITICAL" },
+                new { analyte = "Potassium",  value = Jitter(6.4),  unit = "mEq/L",  referenceRange = "3.5–5.0",   flag = "CRITICAL" },
+                new { analyte = "Creatinine", value = Jitter(3.2),  unit = "mg/dL",  referenceRange = "0.6–1.2",   flag = "CRITICAL" },
+                new { analyte = "Sodium",     value = Jitter(138.0),unit = "mEq/L",  referenceRange = "136–145",   flag = (string?)null },
+            },
+            // Scenario 1 — Abnormal but non-critical (borderline anemia pattern).
+            // Elevated WBC + low Hgb + low Platelets + low MCV suggests possible
+            // iron-deficiency or inflammatory anemia → OrderAdditionalDiagnostics.
+            1 => new object[]
+            {
+                new { analyte = "WBC",        value = Jitter(12.5), unit = "K/uL",   referenceRange = "4.0–11.0",  flag = "HIGH" },
+                new { analyte = "Hgb",        value = Jitter(9.8),  unit = "g/dL",   referenceRange = "12.0–16.0", flag = "LOW"  },
+                new { analyte = "Platelets",  value = Jitter(112.0),unit = "K/uL",   referenceRange = "150–400",   flag = "LOW"  },
+                new { analyte = "MCV",        value = Jitter(72.0), unit = "fL",     referenceRange = "80–100",    flag = "LOW"  },
+                new { analyte = "Sodium",     value = Jitter(138.0),unit = "mEq/L",  referenceRange = "136–145",   flag = (string?)null },
+                new { analyte = "Creatinine", value = Jitter(1.1),  unit = "mg/dL",  referenceRange = "0.6–1.2",   flag = (string?)null },
+            },
+            // Scenario 2 — Normal / near-normal. All values within reference range.
+            // No flags → DocumentAndMonitor.
+            _ => new object[]
+            {
+                new { analyte = "WBC",        value = Jitter(7.8),  unit = "K/uL",   referenceRange = "4.0–11.0",  flag = (string?)null },
+                new { analyte = "Hgb",        value = Jitter(13.1), unit = "g/dL",   referenceRange = "12.0–16.0", flag = (string?)null },
+                new { analyte = "Platelets",  value = Jitter(245.0),unit = "K/uL",   referenceRange = "150–400",   flag = (string?)null },
+                new { analyte = "Sodium",     value = Jitter(140.0),unit = "mEq/L",  referenceRange = "136–145",   flag = (string?)null },
+                new { analyte = "Potassium",  value = Jitter(4.2),  unit = "mEq/L",  referenceRange = "3.5–5.0",   flag = (string?)null },
+                new { analyte = "Creatinine", value = Jitter(0.9),  unit = "mg/dL",  referenceRange = "0.6–1.2",   flag = (string?)null },
+                new { analyte = "Glucose",    value = Jitter(95.0), unit = "mg/dL",  referenceRange = "70–100",    flag = (string?)null },
+            }
+        };
+
+        var result = new
+        {
+            patientName,
+            panelName   = "Comprehensive Metabolic Panel with CBC",
+            collectedAt = DateTime.UtcNow.AddHours(-_rng.Next(2, 12)).ToString("o"),
+            results,
+            retrievedAt = DateTime.UtcNow.ToString("o")
+        };
+        return JsonSerializer.Serialize(result);
+    }
+
+    // ── LabOrder follow-up decision tools ───────────────────
+    //
+    // The agent reads GetLabResults output and selects exactly one of
+    // these three tools based on clinical significance. No validation
+    // pass/fail flag drives the decision — the model must reason about
+    // the actual values.
+
+    [KernelFunction("EscalateCriticalLabValues")]
+    [Description("Initiates urgent clinical escalation for CRITICAL laboratory values requiring immediate physician notification. Call when any result has a CRITICAL flag, or when the combination of abnormal values indicates acute patient instability (e.g., severe anemia + thrombocytopenia + leukocytosis).")]
+    public async Task<string> EscalateCriticalLabValuesAsync(
+        [Description("Full name of the patient")] string patientName,
+        [Description("Comma-separated list of the critical analytes and their values, e.g. 'Hgb 5.8 g/dL (CRITICAL LOW), Platelets 38 K/uL (CRITICAL LOW)'")] string criticalFindings,
+        [Description("Brief clinical rationale for the escalation")] string clinicalRationale)
+    {
+        await Task.Delay(1500);
+        var result = new
+        {
+            escalationId     = $"ESC-{_rng.Next(10_000, 99_999)}",
+            patientName,
+            criticalFindings,
+            clinicalRationale,
+            notifiedProvider = $"Dr. {Pick("Williams", "Johnson", "Smith", "Brown", "Garcia")}",
+            contactMethod    = Pick("Secure page", "Direct call", "On-call pager"),
+            status           = "EscalationInitiated",
+            urgency          = "STAT",
+            issuedAt         = DateTime.UtcNow.ToString("o")
+        };
+        return JsonSerializer.Serialize(result);
+    }
+
+    [KernelFunction("OrderAdditionalDiagnostics")]
+    [Description("Orders targeted follow-up diagnostic tests when laboratory results are abnormal (HIGH or LOW flags) but not critical, and further workup would clarify the clinical picture before a treatment decision is made.")]
+    public async Task<string> OrderAdditionalDiagnosticsAsync(
+        [Description("Full name of the patient")] string patientName,
+        [Description("The specific abnormal finding that prompted the additional testing, e.g. 'Hgb 9.8 LOW with MCV 72 LOW'")] string triggeringFinding,
+        [Description("Specific follow-up tests to order, e.g. 'Iron panel, ferritin, reticulocyte count, B12/folate'")] string additionalTests)
+    {
+        await Task.Delay(1500);
+        var result = new
+        {
+            orderId         = $"LAB-{_rng.Next(10_000, 99_999)}",
+            patientName,
+            triggeringFinding,
+            testsOrdered    = additionalTests,
+            lab             = Pick("Quest Diagnostics", "LabCorp", "BioReference Laboratories", "Hospital Lab"),
+            priority        = "Routine",
+            status          = "OrderCreated",
+            orderedAt       = DateTime.UtcNow.ToString("o")
+        };
+        return JsonSerializer.Serialize(result);
+    }
+
+    [KernelFunction("DocumentAndMonitor")]
+    [Description("Documents laboratory results in the patient chart and schedules routine follow-up monitoring when all values are within normal limits or show only clinically insignificant deviation. Call when no immediate intervention is warranted.")]
+    public async Task<string> DocumentAndMonitorAsync(
+        [Description("Full name of the patient")] string patientName,
+        [Description("Brief summary of the lab findings and clinical assessment, e.g. 'CBC and CMP within normal limits; no acute findings'")] string clinicalSummary,
+        [Description("Recommended follow-up interval, e.g. '3 months', '6 months', 'annual'")] string followUpInterval)
+    {
+        await Task.Delay(1000);
+        var result = new
+        {
+            documentationId = $"DOC-{_rng.Next(10_000, 99_999)}",
+            patientName,
+            clinicalSummary,
+            status          = "Documented",
+            followUpInterval,
+            nextReviewDate  = DateTime.UtcNow.AddMonths(_rng.Next(3, 7)).ToString("yyyy-MM-dd"),
+            documentedAt    = DateTime.UtcNow.ToString("o")
         };
         return JsonSerializer.Serialize(result);
     }

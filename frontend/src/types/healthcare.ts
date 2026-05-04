@@ -20,7 +20,8 @@ export type TaskType =
   | 'MedicationRefill'
   | 'MedicationOrder'
   | 'ReferralOrder'
-  | 'LabOrder';
+  | 'LabOrder'
+  | 'LabResultReview';
 
 // Matches the C# HealthcareTask class.
 // Note the camelCase field names — ASP.NET Core's default JSON
@@ -54,6 +55,8 @@ export type TaskExecutionStatus = 'Running' | 'Completed' | 'Warned' | 'Failed';
 // For the multi-step pipeline, a typical task receives:
 //   - 1 initial Running message (no stepNumber, no toolName)
 //   - N Running messages with stepNumber set (one before each tool call)
+//   - Reasoning messages (messageType === 'Reasoning') interspersed with
+//     tool-call updates for LabOrder tasks
 //   - 1 terminal Completed, Warned, or Failed message (with totalSteps and token counts)
 export interface TaskExecutionUpdate {
   taskId: string;
@@ -69,6 +72,8 @@ export interface TaskExecutionUpdate {
   stepNumber?: number;
   /** Total tool calls made across the full pipeline, present on terminal messages. */
   totalSteps?: number;
+  /** "Reasoning" for model chain-of-thought text captured before a tool call; undefined otherwise. */
+  messageType?: string;
 }
 
 // Pushed via SignalR "TranscriptionStatus" events during POST /api/audio/transcribe.

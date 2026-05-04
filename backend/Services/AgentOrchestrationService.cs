@@ -3,12 +3,21 @@
 //
 // This service receives a batch of TaskExecutionRequests and runs
 // each one concurrently on a background thread. For each task it
-// executes a three-phase pipeline via Semantic Kernel's agentic loop:
+// executes a pipeline via Semantic Kernel's agentic loop:
 //
-//   Phase 1 — Data Retrieval: one or two retrieval tool calls
-//   Phase 2 — Validation: one validation tool call
-//   Phase 3 — Execute or Warn: execution tool if validation passed,
-//             CreateClinicalWarning if validation returned a failure reason
+//   MedicationRefill / MedicationOrder / ReferralOrder:
+//     Phase 1 — Data Retrieval (1–2 tool calls)
+//     Phase 2 — Validation (pass/fail)
+//     Phase 3 — Execute or Warn
+//
+//   LabOrder (2-step reasoning path):
+//     Phase 1 — GetLabResults (rich data with values + reference ranges)
+//     Phase 3 — Agent reads values, reasons about clinical significance,
+//               calls ONE of: EscalateCriticalLabValues,
+//               OrderAdditionalDiagnostics, or DocumentAndMonitor.
+//               The model's reasoning text is captured from ChatHistory
+//               and streamed to the browser as a "Reasoning" update
+//               before the follow-up tool fires.
 //
 // SK's FunctionChoiceBehavior.Auto() handles the agentic loop internally:
 // after each tool result is appended to ChatHistory, SK calls the model
@@ -16,9 +25,10 @@
 // system prompt drives which tools fire in which order.
 //
 // The SignalRInvocationFilter intercepts every tool call and sends a
-// Running-status SignalR update before each one fires, so the browser
-// can display step-by-step progress. The service owns all terminal
-// (Completed / Warned / Failed) sends.
+// Running-status SignalR update before each one fires. For LabOrder,
+// it also extracts the model's TextContent reasoning from the last
+// assistant message and pushes it as a MessageType="Reasoning" update.
+// The service owns all terminal (Completed / Warned / Failed) sends.
 //
 // Registered as Singleton because it holds no per-request state —
 // all per-task state lives in ExecuteSingleTaskAsync locals and the
@@ -54,24 +64,42 @@ public class AgentOrchestrationService(
     // and the filter sets WarnWasIssued so the service sends Warned.
     // ------------------------------------------------------------
     private const string SystemPrompt =
-        "You are a healthcare workflow agent. Execute every task in exactly three sequential phases.\n\n" +
+        "You are a healthcare workflow agent. Execute every task using the pipeline for its type.\n\n" +
+
         "PHASE 1 — DATA RETRIEVAL: Call the retrieval tool(s) for this task type:\n" +
         "  MedicationRefill / MedicationOrder: call GetPatientMedications AND GetPatientAllergies\n" +
-        "  LabOrder:       call GetPastLabOrders\n" +
-        "  ReferralOrder:  call GetPatientDemographics AND GetInsuranceCoverage\n\n" +
-        "PHASE 2 — VALIDATION: Call the validation tool for this task type:\n" +
+        "  LabOrder:         call GetPastLabOrders\n" +
+        "  ReferralOrder:    call GetPatientDemographics AND GetInsuranceCoverage\n" +
+        "  LabResultReview:  call GetLabResults\n\n" +
+
+        "PHASE 2 — VALIDATION:\n" +
         "  MedicationRefill: call ValidateMedicationRefill\n" +
         "  MedicationOrder:  call CheckDrugInteractions\n" +
         "  LabOrder:         call ValidateLabOrderIndication\n" +
-        "  ReferralOrder:    call ValidateReferralAuthorization\n\n" +
-        "PHASE 3 — EXECUTE OR WARN: Examine the validation result's validationFailed field:\n" +
-        "  If validationFailed is null  → call the execution tool for this task type.\n" +
-        "  If validationFailed is set   → call CreateClinicalWarning with patientName and " +
-        "the validationFailed value as the reason. Do NOT call the execution tool.\n\n" +
-        "Execution tools by task type: MedicationRefill→RefillPrescription, " +
+        "  ReferralOrder:    call ValidateReferralAuthorization\n" +
+        "  LabResultReview:  SKIP Phase 2 — proceed directly to Phase 3.\n\n" +
+
+        "PHASE 3 — EXECUTE OR DECIDE:\n" +
+        "  MedicationRefill / MedicationOrder / LabOrder / ReferralOrder: examine the " +
+        "validation result's validationFailed field. If null → call the execution tool. " +
+        "If set → call CreateClinicalWarning with the validationFailed value as the reason.\n" +
+        "  Execution tools: MedicationRefill→RefillPrescription, " +
         "MedicationOrder→CreateMedicationOrder, LabOrder→SubmitLabOrder, " +
         "ReferralOrder→SubmitReferralOrder.\n\n" +
-        "Call tools in order. Do not skip phases. Do not explain — just invoke tools.";
+
+        "  LabResultReview: analyze the GetLabResults output. Read every analyte value, " +
+        "reference range, and flag. Consider the full clinical picture, not just individual " +
+        "values in isolation. Write your clinical reasoning about each flagged analyte before " +
+        "deciding. Then call exactly ONE of these tools:\n" +
+        "    EscalateCriticalLabValues — when any result has flag CRITICAL, or when the " +
+        "combination of abnormal values indicates acute patient instability.\n" +
+        "    OrderAdditionalDiagnostics — when values have HIGH or LOW flags (not CRITICAL) " +
+        "and a specific follow-up test would clarify the clinical picture.\n" +
+        "    DocumentAndMonitor — when all values are within normal limits or deviations " +
+        "are clinically insignificant and no immediate action is required.\n\n" +
+
+        "For LabResultReview tasks: write your clinical reasoning before calling the follow-up " +
+        "tool. For all other task types: do not explain — just invoke tools.";
 
     public Task ExecuteTasksAsync(IEnumerable<TaskExecutionRequest> requests)
     {
@@ -278,6 +306,7 @@ internal sealed class SignalRInvocationFilter(
     : IAutoFunctionInvocationFilter
 {
     private int _stepNumber = 0;
+    private string? _lastReasoningEmitted;
 
     // True once any tool has been called. Used by the service to
     // detect the unexpected case where the model made no tool calls.
@@ -304,6 +333,36 @@ internal sealed class SignalRInvocationFilter(
         ToolWasCalled = true;
         _stepNumber++;
         var toolName = context.Function.Name;
+
+        // Extract any reasoning text the model wrote before deciding to call this tool.
+        // SK appends the model's full response (TextContent + FunctionCallContent items)
+        // to ChatHistory before firing the filter. We pull out just the text portion so
+        // the browser can display the model's chain-of-thought between tool-call entries.
+        // The dedup guard (_lastReasoningEmitted) prevents double-sends when the model
+        // emits multiple tool calls in a single response.
+        var lastAssistant = context.ChatHistory.LastOrDefault(m => m.Role == AuthorRole.Assistant);
+        if (lastAssistant?.Items != null)
+        {
+            var reasoningText = string.Concat(
+                lastAssistant.Items
+                    .OfType<TextContent>()
+                    .Select(tc => tc.Text)
+                    .Where(t => !string.IsNullOrWhiteSpace(t)));
+
+            if (!string.IsNullOrEmpty(reasoningText) && reasoningText != _lastReasoningEmitted)
+            {
+                _lastReasoningEmitted = reasoningText;
+                await hubContext.Clients.All.SendAsync("TaskUpdated", new TaskExecutionUpdate
+                {
+                    TaskId      = taskId,
+                    Status      = TaskExecutionStatus.Running,
+                    Message     = reasoningText,
+                    MessageType = "Reasoning",
+                    StepNumber  = _stepNumber,
+                    StartedAt   = startedAt
+                });
+            }
+        }
 
         // Notify the browser which tool is about to run and which step we're on.
         await hubContext.Clients.All.SendAsync("TaskUpdated", new TaskExecutionUpdate

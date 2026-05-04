@@ -8,6 +8,8 @@
 // For the multi-step pipeline, a typical task produces:
 //   - 1 initial Running message ("Agent initializing...")
 //   - N Running messages, one before each tool call (with StepNumber)
+//   - Reasoning messages (MessageType == "Reasoning") interspersed
+//     with tool-call updates for LabOrder tasks
 //   - 1 terminal Completed, Warned, or Failed message
 //
 // Several fields are nullable because they are only populated at
@@ -24,12 +26,16 @@
 //
 //   TotalSteps  — actual number of tool calls made across the full
 //                 pipeline. Set once on the terminal message.
-//                 Varies by task type (LabOrder = 3, MedicationRefill = 4).
+//                 Varies by task type (LabOrder = 2, MedicationRefill = 4).
 //
 //   PromptTokens / CompletionTokens — populated on the single
 //                 terminal message after the LLM pipeline completes.
 //
 //   CompletedAt — null on Running updates; set on terminal messages.
+//
+//   MessageType — null for normal tool-call Running updates.
+//                 "Reasoning" for assistant text captured before a
+//                 tool call (LabOrder tasks only).
 // ============================================================
 
 namespace SemanticKernelHealthcare.Api.Models;
@@ -47,4 +53,5 @@ public class TaskExecutionUpdate
     public DateTime? CompletedAt { get; set; }
     public int? StepNumber { get; set; }
     public int? TotalSteps { get; set; }
+    public string? MessageType { get; set; }
 }

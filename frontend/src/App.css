@@ -341,6 +341,13 @@
   color: #555;
 }
 
+.task-reasoning-text {
+  font-style: italic;
+  color: #7c5cbf;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 .task-error-text {
   color: #c62828;
 }
@@ -520,20 +527,22 @@
   text-align: center;
 }
 
-.log-icon-running  { color: #58a6ff; }
-.log-icon-success  { color: #3fb950; }
-.log-icon-error    { color: #f85149; }
-.log-icon-warned   { color: #f59e0b; }
+.log-icon-running   { color: #58a6ff; }
+.log-icon-success   { color: #3fb950; }
+.log-icon-error     { color: #f85149; }
+.log-icon-warned    { color: #f59e0b; }
+.log-icon-reasoning { color: #c084fc; }
 
 .log-label {
   color: #8b949e;
   flex-shrink: 0;
 }
 
-.log-entry-running .log-message   { color: #58a6ff; }
-.log-entry-completed .log-message { color: #3fb950; }
-.log-entry-failed .log-message    { color: #f85149; }
-.log-entry-warned .log-message    { color: #f59e0b; }
+.log-entry-running .log-message    { color: #58a6ff; }
+.log-entry-completed .log-message  { color: #3fb950; }
+.log-entry-failed .log-message     { color: #f85149; }
+.log-entry-warned .log-message     { color: #f59e0b; }
+.log-entry-reasoning .log-message  { color: #c084fc; font-style: italic; }
 
 .log-message {
   flex: 1;
@@ -630,9 +639,10 @@
 
   .task-warning-reason { color: #fcd34d; background: #1c1408; border-color: #78350f; }
 
-  .task-status-text { color: #9ca3af; }
-  .task-tool-name   { color: #e5e7eb; }
-  .task-timestamp   { color: #6b7280; }
+  .task-status-text    { color: #9ca3af; }
+  .task-reasoning-text { color: #c4b5fd; }
+  .task-tool-name      { color: #e5e7eb; }
+  .task-timestamp      { color: #6b7280; }
 
   .task-details-toggle { color: #93c5fd; }
 

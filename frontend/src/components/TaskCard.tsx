@@ -24,6 +24,7 @@ const BADGE_COLORS: Record<TaskType, string> = {
   MedicationOrder:  '#1565c0',
   ReferralOrder:    '#e65100',
   LabOrder:         '#6a1b9a',
+  LabResultReview:  '#00695c',
 };
 
 // Human-readable labels for each TaskType, used in the badge.
@@ -32,6 +33,7 @@ const LABEL: Record<TaskType, string> = {
   MedicationOrder:  'Medication Order',
   ReferralOrder:    'Referral Order',
   LabOrder:         'Lab Order',
+  LabResultReview:  'Lab Result Review',
 };
 
 interface TaskCardProps {
@@ -86,14 +88,20 @@ export function TaskCard({ task, execution, onRun }: TaskCardProps) {
       {execution?.status === 'Running' && (
         <div className="task-status-row">
           <span className="spinner" />
-          <span className="task-status-text">
-            {/* Show "Step N: Calling X…" when stepNumber is present (tool calls),
-                or a plain message for the initial "Agent initializing…" update. */}
-            {execution.stepNumber
-              ? `Step ${execution.stepNumber}: ${execution.toolName ? `Calling ${execution.toolName}…` : 'Working…'}`
-              : execution.toolName ? `Calling ${execution.toolName}…` : 'Agent analyzing…'
-            }
-          </span>
+          {execution.messageType === 'Reasoning' ? (
+            // Model's chain-of-thought text captured before the follow-up tool call.
+            // Shown in italic purple to distinguish it from tool-call status lines.
+            <span className="task-reasoning-text">{execution.message}</span>
+          ) : (
+            <span className="task-status-text">
+              {/* Show "Step N: Calling X…" when stepNumber is present (tool calls),
+                  or a plain message for the initial "Agent initializing…" update. */}
+              {execution.stepNumber
+                ? `Step ${execution.stepNumber}: ${execution.toolName ? `Calling ${execution.toolName}…` : 'Working…'}`
+                : execution.toolName ? `Calling ${execution.toolName}…` : 'Agent analyzing…'
+              }
+            </span>
+          )}
         </div>
       )}
 
